@@ -12,83 +12,12 @@
 #include <span>
 #include <vector>
 #include "base.hpp"
-#include "mem_mgr.hpp"
+#include "flat_tree.hpp"
 
 namespace AxML {
     namespace detail {
-
-        using i32 = int32_t;
         template<typename T>
         using vec = std::vector<T>;
-
-        struct FrozenTree {
-            vec<i32> feature_;
-            vec<Scalar> threshold_;
-            vec<i32> children_left_;
-            vec<i32> children_right_;
-            vec<Scalar> value_;
-            i32 n_classes_;
-
-            std::span<const Scalar> leaf_value(const i32 node_id) const {
-                return { value_.data() + static_cast<size_t>(node_id) * n_classes_, static_cast<size_t>(n_classes_) };
-            }
-        };
-
-        struct GTree {
-            ll::tl_vec<i32> feature_;
-            ll::tl_vec<Scalar> threshold_;
-            ll::tl_vec<i32> children_left_;
-            ll::tl_vec<i32> children_right_;
-            ll::tl_vec<Scalar> value_;
-            i32 n_classes_;
-
-            explicit GTree(const i32 n_classes = 0) : n_classes_(n_classes) {}
-
-            i32 new_node() {
-                feature_.push_back(-2);
-                threshold_.push_back(0.0);
-                children_left_.push_back(-1);
-                children_right_.push_back(-1);
-                value_.resize(value_.size() + static_cast<size_t>(n_classes_), 0.0);
-                return static_cast<i32>(feature_.size()) - 1;
-            }
-
-            void make_leaf(const i32 node_id, const ll::tl_vec<Scalar>& proba) {
-                std::ranges::copy(proba, value_.begin() + static_cast<ptrdiff_t>(node_id) * n_classes_);
-            }
-
-            void make_leaf(const i32 node_id, const Scalar scalar) {
-                if (n_classes_ != 1) {
-                    throw std::logic_error("Cannot assign a single scalar to a leaf node when n_classes_ > 1");
-                }
-                value_.at(static_cast<size_t>(node_id)) = scalar;
-            }
-
-            void make_split(const i32 node_id, const i32 feature,
-                const Scalar threshold, const i32 left_id, const i32 right_id)
-            {
-                feature_[node_id] = feature;
-                threshold_[node_id] = threshold;
-                children_left_[node_id] = left_id;
-                children_right_[node_id] = right_id;
-            }
-
-            std::span<const Scalar> leaf_value(const i32 node_id) const {
-                return { value_.data() + static_cast<size_t>(node_id) * n_classes_, static_cast<size_t>(n_classes_) };
-            }
-
-            // Copy the thread local memory back in to global heap space
-            FrozenTree freeze() {
-                return FrozenTree{
-                    vec<i32>(feature_.begin(), feature_.end()),
-                    vec<Scalar>(threshold_.begin(), threshold_.end()),
-                    vec<i32>(children_left_.begin(), children_left_.end()),
-                    vec<i32>(children_right_.begin(), children_right_.end()),
-                    vec<Scalar>(value_.begin(), value_.end()),
-                    n_classes_
-                };
-            }
-        };
 
         struct SortedColumn {
             ll::tl_vec<Scalar> xs;
@@ -149,13 +78,6 @@ namespace AxML {
             return out;
         }
 
-        // In-place partition of a node's row-subset span
-        inline i32 partition_span(std::span<i32> idx, const MatrixC& Xc, const i32 feature, const Scalar threshold) {
-            const auto mid = std::partition(idx.begin(), idx.end(),
-                [&](const i32 row) { return Xc(row, feature) <= threshold; });
-            return static_cast<i32>(mid - idx.begin());
-        }
-
         // Partial Fisher-Yates. After any call, all_features is still a permutation
         // of [0, d), so no re-seeding/reallocation is needed between calls.
         inline void sample_features_inplace(ll::tl_vec<i32>& all_features, const i32 k, std::mt19937& rng) {
@@ -187,8 +109,6 @@ namespace AxML {
     enum class MaxFeatures : int32_t { All = -1, Sqrt = -2, Log2 = -3 };
 
     class DecisionTreeClassifier : public Classifier {
-
-    using i32 = int32_t;
     template<typename T>
     using vec = std::vector<T>;
 
@@ -433,8 +353,6 @@ namespace AxML {
     };
 
     class DecisionTreeRegressor : public Regressor {
-
-    using i32 = int32_t;
     template<typename T>
     using vec = std::vector<T>;
 
@@ -538,7 +456,7 @@ namespace AxML {
             bool is_pure = true;
             for (const auto i : idx) {
                 mean += y_enc(i);
-                is_pure &= y_enc(i) == y_enc(0);
+                is_pure &= scmp(y_enc(i), y_enc(0));
             }
             mean /= static_cast<Scalar>(idx.size());
             const bool hit_depth = (max_depth_ >= 0) && (depth >= max_depth_);
