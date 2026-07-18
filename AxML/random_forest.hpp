@@ -80,7 +80,7 @@ namespace AxML {
             for (Eigen::Index i = 0; i < X.rows(); ++i) {
                 Eigen::Index max_col_idx;
                 preds.row(i).maxCoeff(&max_col_idx);
-                arg_max(i) = static_cast<Scalar>(max_col_idx);
+                arg_max(i) = (*labels)[max_col_idx];
             }
             return arg_max;
         }
