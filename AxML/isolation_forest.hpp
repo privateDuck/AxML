@@ -19,30 +19,198 @@
 #ifndef AXML_ISOLATION_FOREST_HPP
 #define AXML_ISOLATION_FOREST_HPP
 
+#include <random>
 #include "common.hpp"
 #include "base.hpp"
+#include "flat_tree.hpp"
 
 namespace AxML {
 
-    class IsolationForest : public Transformer {
+    namespace detail {
+
+        struct ITree {
+
+            void fit(const MatrixC& Xc, const std::span<i32> idx, std::mt19937_64& rgen) {
+                build_node(idx, 0, Xc, rgen);
+                ftree_ = tree_.freeze();
+            }
+
+            i32 build_node(const std::span<i32> idx, const i32 depth, const MatrixC& Xc, std::mt19937_64& rgen) {
+                const i32 node_id = tree_.new_node();
+                const i32 n_node = idx.size();
+
+                std::uniform_int_distribution<i32> feature_dist(0, Xc.cols() - 1);
+                Scalar min = std::numeric_limits<Scalar>::max();
+                Scalar max = std::numeric_limits<Scalar>::min();
+                const i32 rand_feature = feature_dist(rgen);
+
+                bool is_pure = true;
+                for (const auto i : idx) {
+                    is_pure &= scmp(Xc(i, rand_feature) ,Xc(0, rand_feature));
+                }
+
+                if (is_pure || n_node < 2 || (max_depth_ >= 0 && depth >= max_depth_)) {
+                    tree_.make_leaf(node_id, static_cast<Scalar>(idx.size()));
+                    return node_id;
+                }
+
+                for (const auto i : idx) {
+                    const Scalar val = Xc(i, rand_feature);
+                    if (val < min) min = val;
+                    if (val > max) max = val;
+                }
+
+                std::uniform_real_distribution<Scalar> real_dist(min, max);
+                const Scalar threshold = real_dist(rgen);
+
+                const i32 mid = partition_span(idx, Xc, rand_feature, threshold);
+                const auto left_id = build_node(idx.subspan(0, mid), depth + 1, Xc, rgen);
+                const auto right_id = build_node(idx.subspan(mid), depth + 1, Xc, rgen);
+                tree_.make_split(node_id, rand_feature, threshold, left_id, right_id);
+                return node_id;
+            }
+
+            void score_aggregate(const MatrixR& X, MatrixR& scores) const {
+                for (i32 row = 0; row < X.rows(); ++row) {
+                    i32 node = 0;
+                    Scalar sumDepth = 0.0, sumAbsDiff = 0.0;
+                    while (ftree_.children_left_[node] != -1) {
+                        sumDepth += 1.0;
+                        sumAbsDiff += std::abs(X(row, ftree_.feature_[node]) - ftree_.threshold_[node]);
+                        node = X(row, ftree_.feature_[node]) <= ftree_.threshold_[node] ? ftree_.children_left_[node] : ftree_.children_right_[node];
+                    }
+                    scores(row, 0) = sumDepth + C(ftree_.value_[node]);
+                    scores(row, 1) = sumAbsDiff;
+                }
+            }
+
+            static constexpr Scalar C(const Scalar n) {
+                if (n < 2.1) return 0.0;
+                if (n < 3.1) return 1.0;
+                return 2.0 * (std::log(n - 1.0) + 0.57721566490153286060651209) - (2.0 * (n - 1.0) / n);
+            }
+
+            GTree tree_;
+            FrozenTree ftree_;
+            i32 max_depth_;
+        };
+
+    }
+
+    class IsolationForest final : public Transformer {
     public:
+        IsolationForest(const i32 r_dims, const i32 representations,
+            const i32 sample_size, const i32 trees_per_rep, const i32,
+            const uint64_t random_state, const bool get_raw_scores)
+            : random_state_(random_state),
+              r_dims_(r_dims),
+              representations_(representations),
+              sample_size_(sample_size),
+              trees_per_rep_(trees_per_rep),
+                get_raw_scores_(get_raw_scores)
+        {}
+
         MatrixR transform(const MatrixR &X) const override {
-            // Placeholder for the actual Isolation Forest transformation logic
-            // This should return the anomaly scores or transformed features
-            return MatrixR::Zero(X.rows(), 1); // Placeholder: return a zero matrix
+            const i32 m = X.cols();
+            const i32 n = representations_;
+            const i32 max_depth_ = static_cast<i32>(std::ceil(std::log2(static_cast<double>(sample_size_))));
+
+            std::vector<detail::ITree> trees_;
+            std::mt19937_64 gen(random_state_);
+            std::uniform_real_distribution<Scalar> dis(0.0, 1.0);
+
+            Vector p = Vector::Zero(m);
+            Vector q = Vector::Zero(n);
+            const MatrixC W0 = MatrixC::NullaryExpr(m, n, [&](){ return dis(gen); });
+            std::vector<MatrixC> Ws(representations_);
+
+            for (i32 i = 0; i < representations_; ++i) {
+                p = p.unaryExpr([&](double x) { return dis(gen); });
+                q = q.unaryExpr([&](double x) { return dis(gen); });
+                Ws[i] = W0.cwiseProduct(p * q.transpose());
+            }
+
+            const i32 buf_size = sample_size_ * trees_per_rep_;
+            MatrixC Xc(buf_size, m);
+            std::vector<i32> indices(buf_size);
+            const std::span<i32> full_idx_span(indices);
+
+            std::uniform_int_distribution<i32> dist(0, sample_size_ - 1);
+            for (i32 rep = 0; rep < representations_; ++rep) {
+                gen.seed(random_state_ + rep);
+                for (i32 i = 0; i < buf_size; ++i) {
+                    const i32 idx = dist(gen);
+                    indices[i] = idx;
+                    Xc.row(i) = 1.0 / (1.0 + (-(Ws[rep] * X.row(idx)).array()).exp());
+                }
+
+                for (i32 t = 0; t < trees_per_rep_; ++t) {
+                    trees_.emplace_back();
+                    trees_.back().max_depth_ = max_depth_;
+                    trees_.back().fit(Xc, full_idx_span.subspan(t * sample_size_, sample_size_), gen);
+                }
+            }
+
+            const i32 clvl = std::thread::hardware_concurrency();
+            const i32 batch_size = static_cast<i32>(std::ceil(static_cast<Scalar>(X.rows()) / clvl));
+            MatrixR final_scores(X.rows(), 1);
+            const Scalar CT = detail::ITree::C(sample_size_);
+            for (i32 batch = 0; batch < clvl; ++batch) {
+                const i32 start_row = batch * batch_size;
+                const i32 end_row = std::min(start_row + batch_size, static_cast<i32>(X.rows()));
+                if (start_row >= end_row) break;
+                MatrixR scores(end_row - start_row, 2);
+                const auto subX = X.middleRows(start_row, end_row - start_row);
+                for (const auto& tree : trees_) {
+                    tree.score_aggregate(subX, scores);
+                }
+                scores /= static_cast<Scalar>(trees_.size());
+                Vector anomaly_scores = (-scores.col(0).array() / CT).pow(2.0) * scores.col(1).array();
+            }
+
+            if (!get_raw_scores_) {
+                final_scores = final_scores.unaryExpr([&](const double x) { return x >= 0.7 ? 1.0 : 0.0; });
+            }
+
+            return final_scores; // Placeholder: return a zero matrix
         }
+
     protected:
         void fit_impl(const MatrixR &X, const Vector &y) override {
             // Nothing to fit. Stateless
         }
+
+    public:
+        void fit(const MatrixR &X, const Vector &y) override {
+            // Do nothing. This is overridden to stop the dimension check from happening.
+        }
+
+        void save(OutputArchive &ar) const override;
+        void load(InputArchive &ar) override;
+
+        std::unique_ptr<Estimator> clone() const override {
+            return std::make_unique<IsolationForest>(*this);
+        }
+
+        bool is_fitted() const override { return true; }
+
+        uint64_t dims() const override { return 0; }
+
+        void reset() override {}
+
+        std::string name() const override { return "IsolationForest"; }
+
+        uint32_t type_id() const override {return ID_ISOLATION_FOREST; }
+
     private:
+
         // Parameters for the Isolation Forest
-        int n_trees_;
-        int max_depth_;
-        int min_samples_split_;
-        int min_samples_leaf_;
-        int max_features_;
         uint64_t random_state_;
+        i32 r_dims_;
+        i32 representations_;
+        i32 sample_size_;
+        i32 trees_per_rep_;
+        bool get_raw_scores_;
     };
 
 

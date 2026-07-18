@@ -25,6 +25,8 @@ namespace AxML {
         ID_LDA_CLASSIFIER = 37,
         ID_QDA_CLASSIFIER = 38,
         ID_MLP_CLASSIFIER = 39,
+
+        ID_ISOLATION_FOREST = 100,
     };
 }
 
