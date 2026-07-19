@@ -4,6 +4,7 @@
 
 #include "../base.hpp"
 #include "../feedforward/linear_base.hpp"
+#include "../label_encoder.hpp"
 
 namespace AxML {
 
@@ -118,6 +119,7 @@ namespace AxML {
 
     private:
         MatrixR weights_;
+        LabelEncoder<Scalar> encoder_;
         detail::RegularizationFunc reg_fn_;
         Vector biases_;
         detail::LossFunc loss_fn_ = detail::CrossEntropyLoss{};

@@ -9,6 +9,7 @@ namespace AxML {
     using MatrixR = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
     using MatrixC = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>; // Eigen default
     using Vector = Eigen::Matrix<Scalar, Eigen::Dynamic, 1, Eigen::ColMajor>; // Eigen default
+    using VectorI = Eigen::Matrix<uint64_t, Eigen::Dynamic, 1, Eigen::ColMajor>; // Eigen default
     using VectorR = Eigen::Matrix<Scalar, Eigen::Dynamic, 1, Eigen::RowMajor>;
 
     using i32 = int32_t;
