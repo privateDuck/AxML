@@ -56,6 +56,7 @@ namespace AxML {
     class Transformer : public Estimator {
     public:
         virtual MatrixR transform(const MatrixR& X) const = 0;
+        virtual MatrixR fit_transform(const MatrixR& X) = 0;
     };
 
 

@@ -26,9 +26,9 @@ namespace AxML::detail {
             n_outputs_ = y.cols();
         }
 
-        // LBFGSpp interface: compute loss
+        // Compute loss
         Scalar operator()(const Vector& params, Vector& grad) {
-            // Unpack parameters into weights and biases
+            // unpack parameters into weights and biases
             MatrixR W = Eigen::Map<const MatrixR>(
                 params.data(), n_features_, n_outputs_
             );
@@ -36,16 +36,16 @@ namespace AxML::detail {
                 params.data() + n_features_ * n_outputs_, n_outputs_
             );
 
-            // Forward pass: predictions = X * W + b
+            // predictions = X * W + b
             MatrixR predictions = (X_ * W).rowwise() + b.transpose();
 
-            // Compute data loss and gradient
+            // compute data loss and gradient
                 auto [loss_value, loss_gradient] = std::visit(
                 [&](const auto& loss) { return loss.forward(predictions, y_); },
                 loss_fn_
             );
 
-            // Compute regularization
+            // compute regularization
             auto [penalty, weight_gradient] = std::visit(
                 [&](const auto& reg) { return reg.compute(W); },
                 reg_fn_
@@ -53,7 +53,7 @@ namespace AxML::detail {
 
             const Scalar total_loss = loss_value + penalty;
 
-            // Compute gradients
+            // compute gradients
             // dL/dW = X^T * loss_gradient + reg_gradient
             MatrixR grad_W = X_.transpose() * loss_gradient + weight_gradient;
 
