@@ -13,6 +13,7 @@
 #include <vector>
 #include "base.hpp"
 #include "flat_tree.hpp"
+#include "label_encoder.hpp"
 
 namespace AxML {
     namespace detail {
@@ -80,7 +81,7 @@ namespace AxML {
 
         // Partial Fisher-Yates. After any call, all_features is still a permutation
         // of [0, d), so no re-seeding/reallocation is needed between calls.
-        inline void sample_features_inplace(ll::tl_vec<i32>& all_features, const i32 k, std::mt19937& rng) {
+        inline void sample_features_inplace(std::pmr::vector<i32>& all_features, const i32 k, std::mt19937& rng) {
             const i32 d = static_cast<i32>(all_features.size());
             for (i32 i = 0; i < k; ++i) {
                 std::uniform_int_distribution<i32> dist(i, d - 1);
@@ -124,33 +125,33 @@ namespace AxML {
         random_state_(random_state)
         {}
 
-        void fit(const MatrixR& X, const Vector& y) override {
-            auto [Xc, y_enc, classes] = prepare_shared_data(X, y);
-            ll::tl_vec<i32> indices(static_cast<size_t>(X.rows()));
+        void fit(const MatrixR& X, const VectorI& y) override {
+            auto [Xc, y_enc, encoder] = prepare_shared_data(X, y);
+            std::pmr::vector<i32> indices(static_cast<size_t>(X.rows()));
             std::iota(indices.begin(), indices.end(), 0);
-            fit_shared(Xc, y_enc, std::make_shared<vec<Scalar>>(classes), std::move(indices));
+            fit_shared(Xc, y_enc, std::make_shared<LabelEncoderInternal>(encoder), std::move(indices));
         }
 
-        Scalar predict_label(const MatrixR& X, const i32 row) const {
+        i32 predict_label(const MatrixR& X, const i32 row) const {
             if (!fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
             auto proba = ftree_.leaf_value(predict_node(X, row));
             const auto best = std::ranges::max_element(proba);
-            return (*classes_)[static_cast<i32>(best - proba.begin())];
+            return encoder_->inverse_transform(static_cast<i32>(best - proba.begin()));
         }
 
-        Scalar predict_label(const Eigen::RowVectorX<Scalar>& X) const {
+        i32 predict_label(const Eigen::RowVectorX<Scalar>& X) const {
             auto proba = ftree_.leaf_value(predict_node(X));
             const auto best = std::ranges::max_element(proba);
-            return (*classes_)[static_cast<i32>(best - proba.begin())];
+            return encoder_->inverse_transform(static_cast<i32>(best - proba.begin()));
         }
 
-        Vector predict(const MatrixR& X) const override {
+        VectorI predict(const MatrixR& X) const override {
             if (!fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
-            Vector output(X.rows());
+            VectorI output(X.rows());
             for (i32 i = 0; i < X.rows(); ++i) {
                 output(i) = predict_label(X, i);
             }
@@ -190,14 +191,14 @@ namespace AxML {
     private:
         friend RandomForestClassifier;
 
-        void fit_impl(const MatrixR &X, const Vector &y) override {
+        void fit_impl(const MatrixR &X, const VectorI &y) override {
             // Do nothing
         }
 
-        void fit_shared(const MatrixC& Xc, const vec<i32>& y_enc, const std::shared_ptr<vec<Scalar>>& classes, ll::tl_vec<i32> initial_indices) {
+        void fit_shared(const MatrixC& Xc, const vec<i32>& y_enc, const std::shared_ptr<LabelEncoderInternal>& encoder, std::pmr::vector<i32> initial_indices) {
             d_ = static_cast<i32>(Xc.cols());
-            classes_ = classes;
-            n_classes_ = static_cast<i32>(classes_->size());
+            encoder_ = encoder;
+            n_classes_ = encoder_->num_unique_labels();
 
             sample_indices_ = std::move(initial_indices);
             n_samples_ = static_cast<i32>(sample_indices_.size());
@@ -215,22 +216,18 @@ namespace AxML {
             fitted_ = true;
         }
 
-        static std::tuple<MatrixC, vec<i32>, vec<Scalar>> prepare_shared_data(const MatrixR& X, const Vector& y) {
+        static std::tuple<MatrixC, vec<i32>, LabelEncoderInternal> prepare_shared_data(const MatrixR& X, const VectorI& y) {
             if (X.rows() != y.size()) {
                 throw std::invalid_argument("Size mismatch. X.rows() must be equal to y.size()");
             }
 
-            vec<Scalar> unique_labels(y.data(), y.data() + y.size());
-            std::ranges::sort(unique_labels);
-            unique_labels.erase(std::ranges::unique(unique_labels).begin(), unique_labels.end());
+            LabelEncoderInternal encoder_internal;
+            const auto span_y = std::span<const i32>(y.data(), y.size());
+            encoder_internal.fit(span_y);
+            vec<i32> y_enc = encoder_internal.transform(span_y);
 
-            vec<i32> y_enc(static_cast<size_t>(y.size()));
-            for (i32 i = 0; i < static_cast<i32>(y.size()); ++i) {
-                auto it = std::ranges::lower_bound(unique_labels, y(i));
-                y_enc[static_cast<size_t>(i)] = static_cast<i32>(it - unique_labels.begin());
-            }
             MatrixC Xc = X;
-            return {std::move(Xc), std::move(y_enc), std::move(unique_labels)};
+            return {std::move(Xc), std::move(y_enc), std::move(encoder_internal)};
         }
 
         i32 predict_node(const MatrixR& X, const i32 row) const {
@@ -341,9 +338,9 @@ namespace AxML {
 
         detail::GTree tree_{0};
         detail::FrozenTree ftree_{};
-        std::shared_ptr<vec<Scalar>> classes_;
-        ll::tl_vec<i32> sample_indices_;   // shared permutation buffer, partitioned in place
-        ll::tl_vec<i32> all_features_;     // reused across every split, zero per-node allocation
+        std::shared_ptr<LabelEncoderInternal> encoder_;
+        std::pmr::vector<i32> sample_indices_;   // shared permutation buffer, partitioned in place
+        std::pmr::vector<i32> all_features_;     // reused across every split, zero per-node allocation
         std::mt19937 rng_;
 
         i32 n_samples_ = 0, d_ = 0, n_classes_ = 0, k_features_ = 0;
@@ -373,10 +370,9 @@ namespace AxML {
                 throw std::invalid_argument("Size mismatch. X.rows() must be equal to y.size()");
             }
             const MatrixC Xc = X;
-            ll::tl_vec<i32> indices(static_cast<size_t>(X.rows()));
+            std::pmr::vector<i32> indices(X.rows());
             std::iota(indices.begin(), indices.end(), 0);
             fit_shared(Xc, y, std::move(indices));
-            fitted_ = true;
         }
 
         Vector predict(const MatrixR& X) const override {
@@ -415,7 +411,7 @@ namespace AxML {
             // Do nothing
         }
 
-        void fit_shared(const MatrixC& Xc, const Vector& y_enc, ll::tl_vec<i32> initial_indices) {
+        void fit_shared(const MatrixC& Xc, const Vector& y_enc, std::pmr::vector<i32> initial_indices) {
             d_ = static_cast<i32>(Xc.cols());
 
             sample_indices_ = std::move(initial_indices);
@@ -431,6 +427,7 @@ namespace AxML {
             build_node(std::span<i32>(sample_indices_), 0, Xc, y_enc);
 
             ftree_ = tree_.freeze();
+            fitted_ = true;
         }
 
         i32 predict_node(const MatrixR& X, const i32 row) const {
@@ -526,8 +523,8 @@ namespace AxML {
 
         detail::GTree tree_{0};
         detail::FrozenTree ftree_{};
-        ll::tl_vec<i32> sample_indices_;   // shared permutation buffer, partitioned in place
-        ll::tl_vec<i32> all_features_;     // reused across every split, zero per-node allocation
+        std::pmr::vector<i32> sample_indices_;   // shared permutation buffer, partitioned in place
+        std::pmr::vector<i32> all_features_;     // reused across every split, zero per-node allocation
         std::mt19937 rng_;
 
         i32 n_samples_ = 0, d_ = 0, k_features_ = 0;

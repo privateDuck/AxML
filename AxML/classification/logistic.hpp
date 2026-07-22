@@ -32,14 +32,14 @@ namespace AxML {
             }
         }
 
-        Vector predict(const MatrixR& X) const override {
+        VectorI predict(const MatrixR& X) const override {
             MatrixR probs = predict_proba(X);
-            Vector labels(probs.rows());
+            VectorI labels(probs.rows());
 
             for (int i = 0; i < probs.rows(); ++i) {
                 Eigen::Index max_idx;
                 probs.row(i).maxCoeff(&max_idx);
-                labels(i) = static_cast<Scalar>(max_idx);
+                labels(i) = encoder_.inverse_transform(max_idx);
             }
 
             return labels;
@@ -78,10 +78,14 @@ namespace AxML {
         uint32_t type_id() const override { return ID_LOGISTIC_REGRESSION; }
 
     protected:
-        void fit_impl(const MatrixR& X, const Vector& y) override {
+        void fit_impl(const MatrixR& X, const VectorI& y) override {
             if (!fitted_) {
                 n_features_ = X.cols();
                 n_outputs_ = y.cols();
+                const std::span<const i32> span_y(y.data(), y.size());
+                encoder_.fit(span_y);
+                const std::vector<Scalar> y_enc = encoder_.transform_to_float(span_y);
+                const Vector y_vec = Eigen::Map<const Vector>(y_enc.data(), y_enc.size());
 
                 // Initialize parameters (Xavier initialization)
                 const Scalar limit = std::sqrt(6.0f / static_cast<Scalar>(n_features_ + n_outputs_));
@@ -94,7 +98,7 @@ namespace AxML {
                 Eigen::Map<Vector>(params.data() + n_features_ * n_outputs_, n_outputs_) = biases_;
 
                 // Create optimization problem
-                detail::LinearModelProblem problem(X, y, loss_fn_, reg_fn_);
+                detail::LinearModelProblem problem(X, y_vec, loss_fn_, reg_fn_);
 
                 // Setup LBFGS
                 LBFGSpp::LBFGSParam<Scalar> param;
@@ -119,7 +123,7 @@ namespace AxML {
 
     private:
         MatrixR weights_;
-        LabelEncoder<Scalar> encoder_;
+        LabelEncoderInternal encoder_;
         detail::RegularizationFunc reg_fn_;
         Vector biases_;
         detail::LossFunc loss_fn_ = detail::CrossEntropyLoss{};
