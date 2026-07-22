@@ -4,134 +4,94 @@
 
 #include <vector>
 #include <span>
-#include <cmath>
-#include <algorithm>
-#include <ranges>
-#include <concepts>
 #include <stdexcept>
+#include "ankerl/unordered_dense.h"
 #include "common.hpp"
 
 namespace AxML {
 
-template <std::floating_point T>
-class LabelEncoder {
-
+class LabelEncoderInternal {
 public:
-    /**
-     * Encodes a contiguous array of floats into integer labels (0 to unique_count - 1).
-     *
-     * @param input A contiguous view of floats.
-     * @return A vector of encoded integer indices.
-     */
-    std::vector<i32> encode_i32(std::span<const T> input) {
-        if (input.empty()) {
-            return {};
-        }
+    LabelEncoderInternal() {}
 
-        std::vector<T> rounded_input;
-        rounded_input.reserve(input.size());
+    void fit(const std::span<const i32> input) {
+        r_to_s_.clear();
+        s_to_r_.clear();
 
-        for (const T val : input) {
-            if (std::isnan(val)) {
-                throw std::invalid_argument("NaN values cannot be sorted or encoded reliably.");
+        // Pre-allocate to minimize hash collisions and reallocations during population
+        r_to_s_.reserve(input.size());
+        s_to_r_.reserve(input.size());
+
+        i32 current_s_label = 0;
+
+        for (const i32 val : input) {
+            // If the R value is not yet in our map, assign it the next S label
+            if (r_to_s_.find(val) == r_to_s_.end()) {
+                r_to_s_[val] = current_s_label++;
+                s_to_r_.push_back(val);
             }
-            rounded_input.push_back(std::round(val));
         }
+    }
 
-        unique_labels_ = rounded_input;
-
-        std::ranges::sort(unique_labels_);
-        auto [first, last] = std::ranges::unique(unique_labels_);
-        unique_labels_.erase(first, last);
-
+    std::vector<i32> transform(const std::span<const i32> input) const {
         std::vector<i32> encoded;
         encoded.reserve(input.size());
 
-        // Cache the last lookup to accelerate repetitive sequential data
-        T last_val = unique_labels_.front();
-        int last_label = 0;
-        bool cache_valid = false;
-
-        for (const T val : rounded_input) {
-            if (cache_valid && val == last_val) {
-                encoded.push_back(last_label);
-            } else {
-                auto it = std::ranges::lower_bound(unique_labels_, val);
-                last_label = static_cast<int>(std::distance(unique_labels_.begin(), it));
-                last_val = val;
-                cache_valid = true;
-
-                encoded.push_back(last_label);
+        for (const i32 val : input) {
+            auto it = r_to_s_.find(val);
+            if (it == r_to_s_.end()) {
+                throw std::invalid_argument("Unseen R space value encountered during transform.");
             }
+            encoded.push_back(it->second);
         }
 
         return encoded;
     }
 
-    std::vector<T> encode_scalar(std::span<const T> input) {
-        if (input.empty()) {
-            return {};
-        }
-
-        std::vector<T> rounded_input;
-        rounded_input.reserve(input.size());
-
-        for (const T val : input) {
-            if (std::isnan(val)) {
-                throw std::invalid_argument("NaN values cannot be sorted or encoded reliably.");
-            }
-            rounded_input.push_back(std::round(val));
-        }
-
-        unique_labels_ = rounded_input;
-
-        std::ranges::sort(unique_labels_);
-        auto [first, last] = std::ranges::unique(unique_labels_);
-        unique_labels_.erase(first, last);
-
-        std::vector<T> encoded;
+    std::vector<Scalar> transform_to_float(const std::span<const i32> input) const {
+        std::vector<Scalar> encoded;
         encoded.reserve(input.size());
 
-        // Cache the last lookup to accelerate repetitive sequential data
-        T last_val = unique_labels_.front();
-        i32 last_label = 0;
-        bool cache_valid = false;
-
-        for (const T val : rounded_input) {
-            if (cache_valid && val == last_val) {
-                encoded.push_back(static_cast<T>(last_label));
-            } else {
-                auto it = std::ranges::lower_bound(unique_labels_, val);
-                last_label = static_cast<i32>(std::distance(unique_labels_.begin(), it));
-                last_val = val;
-                cache_valid = true;
-
-                encoded.push_back(static_cast<T>(last_label));
+        for (const i32 val : input) {
+            auto it = r_to_s_.find(val);
+            if (it == r_to_s_.end()) {
+                throw std::invalid_argument("Unseen R space value encountered during transform.");
             }
+            // Cast the integer label to a Scalar representation
+            encoded.push_back(static_cast<Scalar>(it->second));
         }
 
         return encoded;
     }
 
-    /**
-     * Decodes an integer label back to the original rounded floating-point value.
-     *
-     * @param label_index The integer label generated by encode().
-     * @return The rounded floating-point value.
-     */
-    T decode(int label_index) const {
-        if (static_cast<size_t>(label_index) >= unique_labels_.size()) {
-            throw std::out_of_range("Label index out of bounds.");
+    i32 inverse_transform(const i32 s_label) const {
+        // Bounds checking
+        if (s_label < 0 || static_cast<size_t>(s_label) >= s_to_r_.size()) {
+            throw std::out_of_range("S space label out of bounds.");
         }
-        return unique_labels_[label_index];
+
+        return s_to_r_[s_label];
     }
 
-    size_t unique_count() const noexcept {
-        return unique_labels_.size();
+    std::vector<i32> inverse_transform(std::span<const i32> input) const {
+        std::vector<i32> decoded;
+        decoded.reserve(input.size());
+
+        for (const i32 s_label : input) {
+            // Leverages the single-element method for centralized bounds checking
+            decoded.push_back(inverse_transform(s_label));
+        }
+
+        return decoded;
+    }
+
+    i32 num_unique_labels() const {
+        return static_cast<i32>(r_to_s_.size());
     }
 
 private:
-    std::vector<T> unique_labels_;
+    ankerl::unordered_dense::map<i32, i32> r_to_s_;
+    std::vector<i32> s_to_r_;
 };
 
 }

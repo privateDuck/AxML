@@ -6,16 +6,16 @@
 
 namespace AxML {
     using Scalar = double;
-    using MatrixR = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
-    using MatrixC = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>; // Eigen default
-    using Vector = Eigen::Matrix<Scalar, Eigen::Dynamic, 1, Eigen::ColMajor>; // Eigen default
-    using VectorI = Eigen::Matrix<uint64_t, Eigen::Dynamic, 1, Eigen::ColMajor>; // Eigen default
-    using VectorR = Eigen::Matrix<Scalar, Eigen::Dynamic, 1, Eigen::RowMajor>;
-
     using i32 = int32_t;
     using i64 = int64_t;
     using u32 = uint32_t;
     using u64 = uint64_t;
+
+    using MatrixR = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+    using MatrixC = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>; // Eigen default
+    using Vector = Eigen::Matrix<Scalar, Eigen::Dynamic, 1, Eigen::ColMajor>; // Eigen default
+    using VectorI = Eigen::Matrix<i32, Eigen::Dynamic, 1, Eigen::ColMajor>; // Eigen default
+    using VectorR = Eigen::Matrix<Scalar, Eigen::Dynamic, 1, Eigen::RowMajor>;
 
     inline bool scmp(const Scalar a, const Scalar b) {
         constexpr Scalar epsilon = std::numeric_limits<Scalar>::epsilon();
