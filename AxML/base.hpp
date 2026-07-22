@@ -13,13 +13,6 @@ namespace AxML {
     public:
         virtual ~Estimator() = default;
 
-        virtual void fit(const MatrixR& X, const Vector& y) {
-            if(X.rows() != y.size()) {
-                throw std::logic_error("Number of rows in X must match size of y");
-            }
-            fit_impl(X, y);
-        }
-
         virtual void save(OutputArchive& ar) const = 0;
         virtual void load(InputArchive& ar) = 0;
 
@@ -31,30 +24,48 @@ namespace AxML {
 
         virtual std::string name() const = 0;
         virtual uint32_t type_id() const = 0;
+    };
+
+
+    class Classifier : public Estimator {
+    public:
+        virtual void fit(const MatrixR& X, const VectorI& y) {
+            if(X.rows() != y.size()) {
+                throw std::logic_error("Number of rows in X must match size of y");
+            }
+            fit_impl(X, y);
+        }
+
+        virtual VectorI predict(const MatrixR& X) const = 0;
+        virtual bool supports_predict_proba() const noexcept { return false; }
+        virtual MatrixR predict_proba(const MatrixR& X) const {
+            throw std::logic_error("predict_proba not supported by this classifier");
+        }
+
+    protected:
+        virtual void fit_impl(const MatrixR& X, const VectorI& y) = 0;
+    };
+
+
+    class Regressor : public Estimator {
+    public:
+        virtual void fit(const MatrixR& X, const Vector& y) {
+            if(X.rows() != y.size()) {
+                throw std::logic_error("Number of rows in X must match size of y");
+            }
+            fit_impl(X, y);
+        }
+
+        virtual Vector predict(const MatrixR& X) const = 0;
 
     protected:
         virtual void fit_impl(const MatrixR& X, const Vector& y) = 0;
     };
 
 
-    class Classifier : public Estimator {
-    public:
-        virtual Vector predict(const MatrixR& X) const = 0;
-        virtual bool supports_predict_proba() const noexcept { return false; }
-        virtual MatrixR predict_proba(const MatrixR& X) const {
-            throw std::logic_error("predict_proba not supported by this classifier");
-        }
-    };
-
-
-    class Regressor : public Estimator {
-    public:
-        virtual Vector predict(const MatrixR& X) const = 0;
-    };
-
-
     class Transformer : public Estimator {
     public:
+        virtual void fit(const MatrixR& X) = 0;
         virtual MatrixR transform(const MatrixR& X) const = 0;
         virtual MatrixR fit_transform(const MatrixR& X) = 0;
     };
