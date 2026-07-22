@@ -1,37 +1,37 @@
 ## Models
 ### Classification Models
-* Logistic Regression
-* Decision Tree
-* Random Forest
-* Linear SVC
-* RBF SVC
+* Logistic Regression (done)
+* Decision Tree (done)
+* Random Forest (done)
+* Linear SVC (done)
+* RBF SVC (done)
 * K-Nearest Neighbors
 * Naive Bayes
 * Linear Discriminant Analysis
 * Quadratic Discriminant Analysis
-* Multi-layer Perceptron
+* Multi-layer Perceptron (partially)
 
 ### Regression Models
-* Linear Regression
-* Ridge Regression
-* Lasso Regression
-* Elastic Net Regression
-* Decision Tree Regression (Proposed)
-* Random Forest Regression (Proposed)
+* Linear Regression (done)
+* Ridge Regression (done)
+* Lasso Regression (done)
+* Elastic Net Regression (done)
+* Decision Tree Regression (done)
+* Random Forest Regression (done)
 * K-Nearest Neighbors Regression
-* Multi-layer Perceptron based Regression
+* Multi-layer Perceptron based Regression (partially)
 
-### Transformation Models
+### Stateful Transformation Models
 * Principal Component Analysis (PCA)
 * Autoencoder
 * UMAP (Uniform Manifold Approximation and Projection)
 * Standard Scaler
 * Min-Max Scaler
+
+### Stateless Transformation Models
+* Isolation Forest
 * K-Means Clustering
 * Agglomerative Clustering
-
-### Other Models
-* Isolation Forest
 
 ### Evaluation Metrics
 * Accuracy
