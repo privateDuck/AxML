@@ -4,7 +4,6 @@
 #define AXML_MEM_MGR_HPP
 
 #include <memory_resource>
-#include <unordered_map>
 
 namespace AxML::ll {
 
@@ -14,12 +13,12 @@ namespace AxML::ll {
     }
 
     template<typename T>
-    struct TlsAllocator {
+    struct TlAllocator {
         using value_type = T;
-        TlsAllocator() noexcept = default;
+        TlAllocator() noexcept = default;
 
         template<class U>
-        explicit constexpr TlsAllocator(const TlsAllocator<U>&) noexcept {}
+        explicit constexpr TlAllocator(const TlAllocator<U>&) noexcept {}
 
         T* allocate(const std::size_t n) {
             return static_cast<T*>(get_tls_pool()->allocate(n * sizeof(T), alignof(T)));
@@ -31,12 +30,12 @@ namespace AxML::ll {
     };
 
     template <class T, class U>
-    bool operator ==(const TlsAllocator<T>&, const TlsAllocator<U>&) { return true; }
+    bool operator ==(const TlAllocator<T>&, const TlAllocator<U>&) { return true; }
     template <class T, class U>
-    bool operator !=(const TlsAllocator<T>&, const TlsAllocator<U>&) { return false; }
+    bool operator !=(const TlAllocator<T>&, const TlAllocator<U>&) { return false; }
 
     template <typename T>
-    using tl_vec = std::vector<T, TlsAllocator<T>>;
+    using tl_vec = std::vector<T, TlAllocator<T>>;
 }
 
 #endif //AXML_MEM_MGR_HPP
