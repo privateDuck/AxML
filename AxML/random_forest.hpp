@@ -5,6 +5,7 @@
 
 #include "decision_tree.hpp"
 #include <algorithm>
+#include <thread>
 
 namespace AxML {
 
@@ -19,7 +20,7 @@ namespace AxML {
               max_depth_(max_depth), min_samples_split_(min_samples_split),
               min_samples_leaf_(min_samples_leaf), n_threads_(n_threads), max_features_(max_features), bootstrap_(bootstrap) {}
 
-        void fit(const MatrixR &X, const Vector &y) override {
+        void fit(const MatrixR &X, const VectorI &y) override {
             if (X.rows() != y.size()) {
                 throw std::invalid_argument("Size mismatch. X.rows() must be equal to y.size()");
             }
@@ -28,59 +29,82 @@ namespace AxML {
             d_ = X.cols();
             if (bootstrap_size_ < 1 || bootstrap_size_ > n_samples_) bootstrap_size_ = n_samples_;
 
-            const int32_t n_workers = std::max(n_threads_, static_cast<int32_t>(std::thread::hardware_concurrency()));
+            const int32_t n_workers = n_threads_ <= 0 ? std::thread::hardware_concurrency() : std::min(n_threads_, static_cast<i32>(std::thread::hardware_concurrency()));
             const int32_t chunk_size = static_cast<int32_t>(std::ceil(static_cast<float>(n_trees_) / static_cast<float>(n_workers)));
 
-            auto [Xc, y_enc, classes] = DecisionTreeClassifier::prepare_shared_data(X, y);
-            labels = std::make_shared<std::vector<Scalar>>(classes);
+            auto [Xc, y_enc, encoder] = DecisionTreeClassifier::prepare_shared_data(X, y);
+            encoder_ = std::make_shared<LabelEncoderInternal>(std::move(encoder));
 
             for (int32_t i = 0; i < n_trees_; ++i) {
                 trees_.emplace_back(max_depth_, min_samples_split_, min_samples_leaf_, max_features_, random_state_ + i);
             }
 
-            std::vector<std::jthread> workers(n_workers);
+            std::vector<std::jthread> workers;
+            workers.reserve(n_workers);
+            std::exception_ptr exception_ptr = nullptr;
 
             for (int32_t i = 0; i < n_workers; ++i) {
                 const size_t start_idx = i * chunk_size;
                 if (start_idx >= n_trees_) break;
                 const size_t end_idx = std::min(start_idx + chunk_size, static_cast<size_t>(n_trees_));
 
-                workers.emplace_back([this, start_idx, end_idx, &Xc, &y_enc]() {
-                    for (size_t t = start_idx; t < end_idx; ++t) {
-                        ll::tl_vec<int32_t> indices;
+                workers.emplace_back([this, start_idx, end_idx, &Xc, &y_enc, &exception_ptr]() {
+                    try {
+                        std::array<std::byte, 8192> local_buffer;
+                        std::pmr::monotonic_buffer_resource mbr(local_buffer.data(), local_buffer.size(), std::pmr::new_delete_resource());
+                        std::pmr::unsynchronized_pool_resource async_res(&mbr);
 
-                        if (bootstrap_) {
-                            std::mt19937 gen(random_state_ + t);
-                            std::uniform_int_distribution<int32_t> dist(0, bootstrap_size_ - 1);
-                            indices.reserve(bootstrap_size_);
-                            for (int32_t j = 0; j < bootstrap_size_; ++j) {
-                                indices[j] = dist(gen);
+                        detail::TreeCapacityParams tcp;
+                        tcp.maxDepth = max_depth_;
+                        tcp.minSamplesLeaf = min_samples_leaf_;
+                        tcp.minSamplesSplit = min_samples_split_;
+                        tcp.sampleCount = y_enc.size();
+
+                        const auto est_nodes = detail::estimate_tree_capacity(tcp);
+
+                        for (size_t t = start_idx; t < end_idx; ++t) {
+                            std::vector<int32_t> indices;
+
+                            if (bootstrap_) {
+                                std::mt19937 gen(random_state_ + t);
+                                std::uniform_int_distribution<int32_t> dist(0, n_samples_ - 1);
+                                indices.resize(bootstrap_size_);
+                                for (int32_t j = 0; j < bootstrap_size_; ++j) {
+                                    indices[j] = dist(gen);
+                                }
                             }
-                        }
-                        else {
-                            indices.reserve(n_samples_);
-                            std::iota(indices.begin(), indices.end(), 0);
-                        }
+                            else {
+                                indices.resize(n_samples_);
+                                std::iota(indices.begin(), indices.end(), 0);
+                            }
 
-                        trees_[t].fit_shared(Xc, y_enc, labels, std::move(indices));
+                            trees_[t].fit_shared(Xc, y_enc, encoder_, std::move(indices), est_nodes, &async_res);
+                        }
+                    }
+                    catch (...) {
+                        exception_ptr = std::current_exception();
                     }
                 });
             }
+
+            if (exception_ptr) {
+                std::rethrow_exception(exception_ptr);
+            }
         }
 
-        Vector predict(const MatrixR &X) const override {
+        VectorI predict(const MatrixR &X) const override {
             if (trees_.size() == 0) {
                 throw std::runtime_error("Model not fitted yet!");
             }
-            MatrixR preds = MatrixR::Zero(X.rows(), labels->size());
+            MatrixR preds = MatrixR::Zero(X.rows(), encoder_->num_unique_labels());
             for (const auto& tree : trees_) {
                 tree.predict_proba_aggregate(X, preds);
             }
-            Vector arg_max(X.rows());
+            VectorI arg_max(X.rows());
             for (Eigen::Index i = 0; i < X.rows(); ++i) {
                 Eigen::Index max_col_idx;
                 preds.row(i).maxCoeff(&max_col_idx);
-                arg_max(i) = (*labels)[max_col_idx];
+                arg_max(i) = encoder_->inverse_transform(static_cast<i32>(max_col_idx));
             }
             return arg_max;
         }
@@ -89,7 +113,7 @@ namespace AxML {
             if (trees_.size() == 0) {
                 throw std::runtime_error("Model not fitted yet!");
             }
-            MatrixR preds = MatrixR::Zero(X.rows(), labels->size());
+            MatrixR preds = MatrixR::Zero(X.rows(), encoder_->num_unique_labels());
             for (const auto& tree : trees_) {
                 tree.predict_proba_aggregate(X, preds);
             }
@@ -117,13 +141,13 @@ namespace AxML {
         }
 
     protected:
-        void fit_impl(const MatrixR &X, const Vector &y) override {
+        void fit_impl(const MatrixR &X, const VectorI &y) override {
             // Do nothing
         }
 
     private:
         std::vector<DecisionTreeClassifier> trees_;
-        std::shared_ptr<std::vector<Scalar>> labels;
+        std::shared_ptr<LabelEncoderInternal> encoder_;
         uint64_t random_state_;
         int32_t n_samples_{};
         int32_t d_{};
@@ -157,7 +181,7 @@ namespace AxML {
             n_samples_ = X.rows();
             if (bootstrap_size_ < 1 || bootstrap_size_ > n_samples_) bootstrap_size_ = n_samples_;
 
-            const int32_t n_workers = std::max(n_threads_, static_cast<int32_t>(std::thread::hardware_concurrency()));
+            const int32_t n_workers = n_threads_ <= 0 ? std::thread::hardware_concurrency() : std::min(n_threads_, static_cast<i32>(std::thread::hardware_concurrency()));
             const int32_t chunk_size = static_cast<int32_t>(std::ceil(static_cast<float>(n_trees_) / static_cast<float>(n_workers)));
 
             MatrixC Xc = X;
@@ -174,23 +198,35 @@ namespace AxML {
                 const size_t end_idx = std::min(start_idx + chunk_size, static_cast<size_t>(n_trees_));
 
                 workers.emplace_back([this, start_idx, end_idx, &Xc, &y]() {
+                    std::array<std::byte, 8192> local_buffer;
+                    std::pmr::monotonic_buffer_resource mbr(local_buffer.data(), local_buffer.size(), std::pmr::new_delete_resource());
+                    std::pmr::unsynchronized_pool_resource async_res(&mbr);
+
+                    detail::TreeCapacityParams tcp;
+                    tcp.maxDepth = max_depth_;
+                    tcp.minSamplesLeaf = min_samples_leaf_;
+                    tcp.minSamplesSplit = min_samples_split_;
+                    tcp.sampleCount = y.size();
+
+                    const auto est_nodes = detail::estimate_tree_capacity(tcp);
+
                     for (size_t t = start_idx; t < end_idx; ++t) {
-                        ll::tl_vec<int32_t> indices;
+                        std::vector<int32_t> indices;
 
                         if (bootstrap_) {
                             std::mt19937 gen(random_state_ + t);
-                            std::uniform_int_distribution<int32_t> dist(0, bootstrap_size_ - 1);
-                            indices.reserve(bootstrap_size_);
+                            std::uniform_int_distribution<int32_t> dist(0, n_samples_ - 1);
+                            indices.resize(bootstrap_size_);
                             for (int32_t j = 0; j < bootstrap_size_; ++j) {
                                 indices[j] = dist(gen);
                             }
                         }
                         else {
-                            indices.reserve(n_samples_);
+                            indices.resize(n_samples_);
                             std::iota(indices.begin(), indices.end(), 0);
                         }
 
-                        trees_[t].fit_shared(Xc, y, std::move(indices));
+                        trees_[t].fit_shared(Xc, y, std::move(indices), est_nodes, &async_res);
                     }
                 });
             }
