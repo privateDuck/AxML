@@ -13,6 +13,18 @@ namespace AxML {
 class LabelEncoderInternal {
 public:
     LabelEncoderInternal() {}
+    LabelEncoderInternal(const LabelEncoderInternal& other) : r_to_s_(other.r_to_s_) , s_to_r_(other.s_to_r_) {}
+    LabelEncoderInternal(LabelEncoderInternal&& other) noexcept : r_to_s_(std::move(other.r_to_s_)), s_to_r_(std::move(other.s_to_r_)) {}
+    LabelEncoderInternal& operator=(const LabelEncoderInternal& other) {
+        r_to_s_ = other.r_to_s_;
+        s_to_r_ = other.s_to_r_;
+        return *this;
+    }
+    LabelEncoderInternal& operator=(LabelEncoderInternal&& other) noexcept {
+        r_to_s_ = std::move(other.r_to_s_);
+        s_to_r_ = std::move(other.s_to_r_);
+        return *this;
+    }
 
     void fit(const std::span<const i32> input) {
         r_to_s_.clear();
@@ -73,12 +85,11 @@ public:
         return s_to_r_[s_label];
     }
 
-    std::vector<i32> inverse_transform(std::span<const i32> input) const {
+    std::vector<i32> inverse_transform(const std::span<const i32> input) const {
         std::vector<i32> decoded;
         decoded.reserve(input.size());
 
         for (const i32 s_label : input) {
-            // Leverages the single-element method for centralized bounds checking
             decoded.push_back(inverse_transform(s_label));
         }
 
