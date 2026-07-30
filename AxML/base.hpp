@@ -4,10 +4,12 @@
 
 #include <span>
 #include "common.hpp"
+#include "label_encoder.hpp"
 
 namespace AxML {
     class OutputArchive;
     class InputArchive;
+    class ClassificationReport;
 
     class Estimator {
     public:
@@ -41,11 +43,10 @@ namespace AxML {
         virtual MatrixR predict_proba(const MatrixR& X) const {
             throw std::logic_error("predict_proba not supported by this classifier");
         }
-
+        virtual ClassificationReport score(const MatrixR& X, const VectorI& y_true) const;
     protected:
         virtual void fit_impl(const MatrixR& X, const VectorI& y) = 0;
     };
-
 
     class Regressor : public Estimator {
     public:

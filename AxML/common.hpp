@@ -19,7 +19,7 @@ namespace AxML {
 
     inline bool scmp(const Scalar a, const Scalar b) {
         constexpr Scalar epsilon = std::numeric_limits<Scalar>::epsilon();
-        float diff = std::abs(a - b);
+        const Scalar diff = std::abs(a - b);
         if (diff <= epsilon) return true;
         return diff <= (epsilon * std::max(std::abs(a), std::abs(b)));
     }
