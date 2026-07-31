@@ -34,15 +34,15 @@
 * Agglomerative Clustering
 
 ### Evaluation Metrics
-* Accuracy
-* Precision
-* Recall
-* F1 Score
-* Mean Squared Error (MSE)
-* Root Mean Squared Error (RMSE)
-* Mean Absolute Error (MAE)
-* R-squared (R²)
-* Confusion Matrix
+* Accuracy (done)
+* Precision (done)
+* Recall (done)
+* F1 Score (done)
+* Mean Squared Error (MSE) (done)
+* Root Mean Squared Error (RMSE) (done)
+* Mean Absolute Error (MAE) (done)
+* R-squared (R²) (done)
+* Confusion Matrix (done)
 * Receiver Operating Characteristic (ROC) Curve
 * Area Under the Curve (AUC)
 * Silhouette Score
