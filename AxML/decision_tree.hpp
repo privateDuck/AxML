@@ -14,9 +14,6 @@
 #include <vector>
 #include "base.hpp"
 #include "flat_tree.hpp"
-#include "label_encoder.hpp"
-
-
 
 namespace AxML {
     namespace detail {
@@ -137,10 +134,9 @@ namespace AxML {
             fit_shared(Xc, y_enc, std::make_shared<LabelEncoderInternal>(encoder), std::move(indices), est_nodes, &async_res);
         }
 
+        // Unsafe methods. These do not check for the validity of the inputs or the state of the model
+        // NOT RECOMMENDED FOR PUBLIC USE
         i32 predict_label(const MatrixR& X, const i32 row) const {
-            if (!fitted_) {
-                throw std::runtime_error("Model not fitted yet!");
-            }
             auto proba = tree_.get_leaf_value(predict_node(X, row));
             const auto best = std::ranges::max_element(proba);
             return encoder_->inverse_transform(static_cast<i32>(best - proba.begin()));
@@ -153,6 +149,9 @@ namespace AxML {
         }
 
         VectorI predict(const MatrixR& X) const override {
+            if (X.cols() != dims()) {
+                throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", d_, X.cols()));
+            }
             if (!fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -164,6 +163,9 @@ namespace AxML {
         }
 
         MatrixR predict_proba(const MatrixR& X) const override {
+            if (X.cols() != dims()) {
+                throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", d_, X.cols()));
+            }
             if (!fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -195,6 +197,10 @@ namespace AxML {
         bool is_fitted() const override {return fitted_;}
     private:
         friend RandomForestClassifier;
+
+        const LabelEncoderInternal &get_encoder_() const override {
+            return *encoder_;
+        }
 
         void fit_impl(const MatrixR &X, const VectorI &y) override {
             // Do nothing
@@ -378,10 +384,6 @@ namespace AxML {
         {}
 
         void fit(const MatrixR& X, const Vector& y) override {
-            if (X.rows() != y.size()) {
-                throw std::invalid_argument("Size mismatch. X.rows() must be equal to y.size()");
-            }
-
             std::array<std::byte, 8192> local_buffer;
             std::pmr::monotonic_buffer_resource mbr(local_buffer.data(), local_buffer.size(), std::pmr::new_delete_resource());
             std::pmr::unsynchronized_pool_resource async_res(&mbr);
@@ -402,6 +404,9 @@ namespace AxML {
         }
 
         Vector predict(const MatrixR& X) const override {
+            if (X.cols() != d_) {
+                throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", d_, X.cols()));
+            }
             if (!fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -438,6 +443,9 @@ namespace AxML {
         }
 
         void fit_shared(const MatrixC& Xc, const Vector& y, std::vector<i32> initial_indices, const size_t est_nodes, std::pmr::memory_resource* pool_res) {
+            if (Xc.rows() != y.size()) {
+                throw std::invalid_argument("Size mismatch. X.rows() must be equal to y.size()");
+            }
             d_ = static_cast<i32>(Xc.cols());
 
             sample_indices_ = std::move(initial_indices);

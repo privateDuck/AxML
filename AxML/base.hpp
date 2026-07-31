@@ -3,13 +3,14 @@
 #define AXML_ESTIMATOR_HPP
 
 #include <span>
+#include <format>
 #include "common.hpp"
 #include "label_encoder.hpp"
+#include "metrics.hpp"
 
 namespace AxML {
     class OutputArchive;
     class InputArchive;
-    class ClassificationReport;
 
     class Estimator {
     public:
@@ -43,9 +44,23 @@ namespace AxML {
         virtual MatrixR predict_proba(const MatrixR& X) const {
             throw std::logic_error("predict_proba not supported by this classifier");
         }
-        virtual ClassificationReport score(const MatrixR& X, const VectorI& y_true) const;
+        ClassificationReport score(const MatrixR& X, const VectorI& y_true) const {
+            if (X.rows() != y_true.size()) {
+                throw std::runtime_error("Number of rows in X must match size of y_true");
+            }
+            ClassificationReport report;
+            const auto& enc_ = get_encoder_();
+            const auto preds = predict(X);
+            const auto pred_enc = enc_.transform(std::span(preds.data(), preds.size()));
+            const auto true_enc = enc_.transform(std::span(y_true.data(), y_true.size()));
+            const auto pred_span = std::span(pred_enc.data(), pred_enc.size());
+            const auto true_span = std::span(true_enc.data(), true_enc.size());
+            report.score(pred_span, true_span, enc_.num_unique_labels());
+            return report;
+        }
     protected:
         virtual void fit_impl(const MatrixR& X, const VectorI& y) = 0;
+        virtual const LabelEncoderInternal& get_encoder_() const = 0;
     };
 
     class Regressor : public Estimator {

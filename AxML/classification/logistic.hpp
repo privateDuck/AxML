@@ -33,6 +33,10 @@ namespace AxML {
         }
 
         VectorI predict(const MatrixR& X) const override {
+            if (X.cols() != n_features_) {
+                throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", n_features_, X.cols()));
+            }
+
             MatrixR probs = predict_proba(X);
             VectorI labels(probs.rows());
 
@@ -46,6 +50,10 @@ namespace AxML {
         }
         bool supports_predict_proba() const noexcept override { return true; }
         MatrixR predict_proba(const MatrixR& X) const override {
+            if (X.cols() != n_features_) {
+                throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", n_features_, X.cols()));
+            }
+
             if (!fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -78,6 +86,10 @@ namespace AxML {
         uint32_t type_id() const override { return ID_LOGISTIC_REGRESSION; }
 
     protected:
+        const LabelEncoderInternal& get_encoder_() const override {
+            return encoder_;
+        }
+
         void fit_impl(const MatrixR& X, const VectorI& y) override {
             if (!fitted_) {
                 n_features_ = X.cols();

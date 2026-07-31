@@ -5,10 +5,10 @@
 * Random Forest (done)
 * Linear SVC (done)
 * RBF SVC (done)
-* K-Nearest Neighbors
-* Naive Bayes
-* Linear Discriminant Analysis
-* Quadratic Discriminant Analysis
+* K-Nearest Neighbors (Removed)
+* Naive Bayes (done)
+* Linear Discriminant Analysis (done)
+* Quadratic Discriminant Analysis (done)
 * Multi-layer Perceptron (partially)
 
 ### Regression Models
@@ -18,7 +18,7 @@
 * Elastic Net Regression (done)
 * Decision Tree Regression (done)
 * Random Forest Regression (done)
-* K-Nearest Neighbors Regression
+* K-Nearest Neighbors Regression (Removed)
 * Multi-layer Perceptron based Regression (partially)
 
 ### Stateful Transformation Models
@@ -29,7 +29,7 @@
 * Min-Max Scaler
 
 ### Stateless Transformation Models
-* Isolation Forest
+* Isolation Forest (DIP - Partially, IP - Started)
 * K-Means Clustering
 * Agglomerative Clustering
 
@@ -46,3 +46,8 @@
 * Receiver Operating Characteristic (ROC) Curve
 * Area Under the Curve (AUC)
 * Silhouette Score
+
+
+---
+### Add classifier to return const ref to encoder
+### Add classification metrics as a class that computes meaningful results

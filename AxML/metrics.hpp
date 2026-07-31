@@ -2,9 +2,8 @@
 #ifndef AXML_METRICS_HPP
 #define AXML_METRICS_HPP
 
+#include <span>
 #include "common.hpp"
-#include "label_encoder.hpp"
-
 
 namespace AxML::metrics {
     class Classifier;
@@ -16,23 +15,22 @@ namespace AxML::metrics {
         i32 TN; // true negatives
         i32 FP; // false positives
         i32 FN; // false negatives
-        PredictionCounts() : weight(0.0), TP(0), TN(0), FP(0), FN(0) {}
+        PredictionCounts() : TP(0), TN(0), FP(0), FN(0) {}
     };
 
     // Needs a better name
-    inline std::vector<PredictionCounts> multi_count(const LabelEncoderInternal& enc, const Eigen::Ref<const VectorI>& preds, const Eigen::Ref<const VectorI>& truths) {
-        std::vector<PredictionCounts> counts(enc.num_unique_labels());
-        const auto enc_preds = enc.transform(std::span(preds.data(), preds.size()));
-        const auto enc_truths = enc.transform(std::span(truths.data(), truths.size()));
+    // Expects 0 indexed encoded class labels (preferably sorted in ascending order of the size of the classes
+    inline std::vector<PredictionCounts> multi_count(const std::span<const i32> preds, const std::span<const i32> truths, const i32 num_classes) {
+        std::vector<PredictionCounts> counts(num_classes);
 
-        for (i32 class_ = 0; class_ < enc.num_unique_labels(); ++class_) {
+        for (i32 class_ = 0; class_ < num_classes; ++class_) {
             // Whole reason to encode again is to guarantee that classes are 0 indexed
             // We would need to collect unique values anyway to ensure that we have all classes, so this is a better approach
             auto&[weight, TP, TN, FP, FN] = counts[class_];
 
             for (i32 i = 0; i < preds.size(); ++i) {
-                const i32 true_class_ = enc_truths[i];
-                const i32 pred_class_ = enc_preds[i];
+                const i32 true_class_ = truths[i];
+                const i32 pred_class_ = preds[i];
 
                 if (pred_class_ == class_ && true_class_ == class_) {
                     ++TP;
@@ -197,43 +195,17 @@ namespace AxML::metrics {
         return 0.0; // Default return value if method is not recognized
     }
 
-    // Smallest class goes on the first row/column
-    // Filled in sorted order of the size of the class
-    inline MatrixC confusion_matrix(const LabelEncoderInternal& encoder, const VectorI& preds, const VectorI& actual) {
-        const auto enc_preds = encoder.transform(std::span(preds.data(), preds.size()));
-        const auto enc_actual = encoder.transform(std::span(actual.data(), actual.size()));
-        const i32 n_classes = encoder.num_unique_labels();
+    // Expects 0 indexed class labels.
+    // Order depends on whether encoded values are sorted.
+    inline MatrixC confusion_matrix(const std::span<const i32> preds, const std::span<const i32> actual, const i32 n_classes) {
         MatrixC cm = MatrixC::Zero(n_classes, n_classes);
         for (i32 i = 0; i < preds.size(); ++i) {
-            const i32 row = enc_actual[i];
-            const i32 col = enc_preds[i];
+            const i32 row = actual[i];
+            const i32 col = preds[i];
             cm(row, col) += 1.0;
         }
         return cm;
     }
-
-    class ClassificationReport {
-    public:
-        ClassificationReport() = default;
-
-        Scalar accuracy_score() const { return average_accuracy(counts_); }
-        Scalar precision_score(const AverageMethod method = AverageMethod::Macro) const { return average_precision(counts_, method); }
-        Scalar recall_score(const AverageMethod method = AverageMethod::Macro) const { return average_recall(counts_, method); }
-        Scalar f1_score(const AverageMethod method = AverageMethod::Macro) const { return average_f1(counts_, method); }
-        Scalar balanced_accuracy() const { return average_recall(counts_, AverageMethod::Macro); }
-        const MatrixC& get_confusion_matrix() const { return cm_; }
-
-    private:
-        friend Classifier;
-
-        void score(const LabelEncoderInternal& encoder, const Eigen::Ref<const VectorI>& preds, const Eigen::Ref<const VectorI>& actual) {
-            counts_ = multi_count(encoder, preds, actual);
-            cm_ = confusion_matrix(encoder, preds, actual);
-        }
-
-        std::vector<PredictionCounts> counts_;
-        MatrixC cm_;
-    };
 
     //-------------------------------------//
     // Regression Metrics //
@@ -301,5 +273,34 @@ namespace AxML::metrics {
     }
 
 }
+
+
+namespace AxML {
+
+    class ClassificationReport {
+    public:
+        ClassificationReport() = default;
+
+        Scalar accuracy_score() const { return metrics::average_accuracy(counts_); }
+        Scalar precision_score(const metrics::AverageMethod method = metrics::AverageMethod::Macro) const { return metrics::average_precision(counts_, method); }
+        Scalar recall_score(const metrics::AverageMethod method = metrics::AverageMethod::Macro) const { return metrics::average_recall(counts_, method); }
+        Scalar f1_score(const metrics::AverageMethod method = metrics::AverageMethod::Macro) const { return metrics::average_f1(counts_, method); }
+        Scalar balanced_accuracy() const { return metrics::average_recall(counts_, metrics::AverageMethod::Macro); }
+        const MatrixC& get_confusion_matrix() const { return cm_; }
+
+        void score(const std::span<const i32> preds, const std::span<const i32> actual, const i32 num_classes) {
+            num_classes_ = num_classes;
+            counts_ = metrics::multi_count(preds, actual, num_classes);
+            cm_ = metrics::confusion_matrix(preds, actual, num_classes);
+        }
+
+    private:
+        std::vector<metrics::PredictionCounts> counts_;
+        MatrixC cm_;
+        i32 num_classes_ = 0;
+    };
+
+}
+
 
 #endif //AXML_METRICS_HPP

@@ -27,6 +27,9 @@ namespace AxML {
         uint32_t type_id() const override { return ID_LDA_CLASSIFIER; }
 
         VectorI predict(const MatrixR &X) const override {
+            if (X.cols() != num_features_) {
+                throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", num_features_, X.cols()));
+            }
             if (!is_fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -43,6 +46,9 @@ namespace AxML {
         bool supports_predict_proba() const noexcept override { return true; }
 
         MatrixR predict_proba(const MatrixR &X) const override {
+            if (X.cols() != num_features_) {
+                throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", num_features_, X.cols()));
+            }
             if (!is_fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -52,6 +58,10 @@ namespace AxML {
         }
 
     protected:
+        const LabelEncoderInternal &get_encoder_() const override {
+            return encoder_;
+        }
+
         void fit_impl(const MatrixR &X, const VectorI &y) override {
             const std::span<const i32> y_span(y.data(), y.size());
             encoder_.fit(y_span);
@@ -157,7 +167,6 @@ namespace AxML {
         bool is_fitted_ = false;
     };
 
-
     class QuadraticDiscriminantAnalysis final : public Classifier {
     public:
         explicit QuadraticDiscriminantAnalysis(const bool is_naive_bayes = false) : is_naive_bayes_(is_naive_bayes) {}
@@ -180,6 +189,9 @@ namespace AxML {
         uint64_t dims() const override { return num_features_; }
 
         VectorI predict(const MatrixR &X) const override {
+            if (X.cols() != num_features_) {
+                throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", num_features_, X.cols()));
+            }
             if (!is_fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -194,6 +206,9 @@ namespace AxML {
         }
 
         MatrixR predict_proba(const MatrixR &X) const override {
+            if (X.cols() != num_features_) {
+                throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", num_features_, X.cols()));
+            }
             if (!is_fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -203,6 +218,10 @@ namespace AxML {
         }
 
     protected:
+        const LabelEncoderInternal &get_encoder_() const override {
+            return encoder_;
+        }
+
         void fit_impl(const MatrixR &X, const VectorI &y) override {
             const std::span y_span(y.data(), y.size());
             encoder_.fit(y_span);

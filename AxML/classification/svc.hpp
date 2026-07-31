@@ -8,6 +8,7 @@
 #include "../rff.hpp"
 
 namespace AxML {
+    class RBFSVC;
 
     class LinearSVC : public Classifier {
     public:
@@ -16,14 +17,17 @@ namespace AxML {
         C_(C), max_iter_(max_iter), fitted_(false) {
         }
 
-        Vector predict(const MatrixR &X) const override {
+        VectorI predict(const MatrixR &X) const override {
+            if (X.cols() != n_features_) {
+                throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", n_features_, X.cols()));
+            }
             MatrixR scores = lin_solve(X);
-            Vector labels(scores.rows());
+            VectorI labels(scores.rows());
 
             for (int i = 0; i < scores.rows(); ++i) {
                 Eigen::Index max_idx;
                 scores.row(i).maxCoeff(&max_idx);
-                labels(i) = static_cast<Scalar>(max_idx);
+                labels(i) = encoder_.inverse_transform(max_idx);
             }
 
             return labels;
@@ -56,7 +60,13 @@ namespace AxML {
         uint32_t type_id() const override {return ID_LINEAR_SV_CLASSIFIER;}
 
     protected:
-        void fit_impl(const MatrixR &X, const Vector &y) override {
+        friend RBFSVC;
+
+        const LabelEncoderInternal& get_encoder_() const override {
+            return encoder_;
+        }
+
+        void fit_impl(const MatrixR &X, const VectorI &y) override {
             // SVM convention: minimize (1/C)||w||² + Σ hinge_loss
             // Equivalent to: minimize hinge_loss + (1/2C)λ||w||²
             // So we need to adjust regularization strength based on C
@@ -64,6 +74,11 @@ namespace AxML {
             if (!fitted_) {
                 n_features_ = X.cols();
                 n_outputs_ = y.cols();
+
+                const auto y_span = std::span(y.data(), y.size());
+                encoder_.fit(y_span);
+                const auto y_enc_scalar = encoder_.transform_to_float(y_span);
+                const Vector y_enc_vector = Eigen::Map<const Vector>(y_enc_scalar.data(), y_enc_scalar.size());
 
                 // Initialize parameters (Xavier initialization)
                 const Scalar limit = std::sqrt(6.0f / static_cast<Scalar>(n_features_ + n_outputs_));
@@ -76,7 +91,9 @@ namespace AxML {
                 Eigen::Map<Vector>(params.data() + n_features_ * n_outputs_, n_outputs_) = biases_;
 
                 // Create optimization problem
-                detail::LinearModelProblem problem(X, y, loss_fn_, reg_fn_);
+                // TODO: There is an inefficiency here. y_enc_vector is copied since the expected type is MatrixR
+                // FIX: Use DenseBase<Derived> template pattern and a move semantic??
+                detail::LinearModelProblem problem(X, y_enc_vector, loss_fn_, reg_fn_);
 
                 // Setup LBFGS
                 LBFGSpp::LBFGSParam<Scalar> param;
@@ -108,6 +125,7 @@ namespace AxML {
             return (X * weights_).rowwise() + biases_.transpose();
         }
 
+        LabelEncoderInternal encoder_;
         MatrixR weights_;
         detail::RegularizationFunc reg_fn_;
         Vector biases_;
@@ -129,7 +147,7 @@ namespace AxML {
             const int64_t max_iter = 10000, const Scalar tolerance = 1e-6) :
         linear_svc_(C, max_iter, tolerance), gamma_(gamma), C_(C), rf_features_(rf_features) {}
 
-        Vector predict(const MatrixR &X) const override {
+        VectorI predict(const MatrixR &X) const override {
             if (!linear_svc_.is_fitted()) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -163,7 +181,10 @@ namespace AxML {
         uint32_t type_id() const override {return ID_RBF_SV_CLASSIFIER;}
 
     protected:
-        void fit_impl(const MatrixR &X, const Vector &y) override {
+        const LabelEncoderInternal &get_encoder_() const override {
+            return linear_svc_.encoder_;
+        }
+        void fit_impl(const MatrixR &X, const VectorI &y) override {
             if (!linear_svc_.is_fitted()) {
                 rff_.generate(X.cols(), rf_features_, gamma_);
                 MatrixR Z = rff_.transform(X);

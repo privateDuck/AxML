@@ -93,6 +93,9 @@ namespace AxML {
         }
 
         VectorI predict(const MatrixR &X) const override {
+            if (X.cols() != d_) {
+                throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", d_, X.cols()));
+            }
             if (trees_.size() == 0) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -110,6 +113,9 @@ namespace AxML {
         }
 
         MatrixR predict_proba(const MatrixR &X) const override {
+            if (X.cols() != d_) {
+                throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", d_, X.cols()));
+            }
             if (trees_.size() == 0) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -137,10 +143,14 @@ namespace AxML {
             if (trees_.empty()) {
                 return 0;
             }
-            return trees_[0].dims();
+            return d_;
         }
 
     protected:
+        const LabelEncoderInternal &get_encoder_() const override {
+            return *encoder_;
+        }
+
         void fit_impl(const MatrixR &X, const VectorI &y) override {
             // Do nothing
         }
@@ -233,6 +243,9 @@ namespace AxML {
         }
 
         Vector predict(const MatrixR &X) const override {
+            if (X.cols() != dims()) {
+                throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", dims(), X.cols()));
+            }
             if (trees_.size() == 0) {
                 throw std::runtime_error("Model not fitted yet!");
             }

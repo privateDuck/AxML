@@ -8,11 +8,21 @@ namespace AxML {
     struct Tensor3 {
         Tensor3();
         Tensor3(const i32 dim1, const i32 dim2, const i32 dim3): data(dim1 * dim2 * dim3), dim1_(dim1), dim2_(dim2) ,dim3_(dim3) {}
-        Eigen::Map<MatrixR> operator()(const i32 i) {
+        Eigen::Map<MatrixC> operator()(const i32 i) {
             if (i < 0 || i >= dim1_) {
                 throw std::out_of_range("Index out of range for Tensor3");
             }
-            return Eigen::Map<MatrixR>(data.data() + static_cast<size_t>(i) * dim2_ * dim3_, dim2_, dim3_);
+            return Eigen::Map<MatrixC>(data.data() + static_cast<size_t>(i) * dim2_ * dim3_, dim2_, dim3_);
+        }
+
+        void set_dim1(const i32 i, const Eigen::Ref<const MatrixC>& mat) {
+            if (i < 0 || i >= dim1_) {
+                throw std::out_of_range("Index out of range for Tensor3");
+            }
+            if (mat.rows() != dim2_ || mat.cols() != dim3_) {
+                throw std::invalid_argument("Matrix dimensions do not match Tensor3 slice dimensions");
+            }
+            std::copy_n(mat.data(), mat.size(), data.begin() + static_cast<size_t>(i) * dim2_ * dim3_);
         }
     private:
         std::vector<Scalar> data;
