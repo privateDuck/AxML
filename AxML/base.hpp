@@ -84,6 +84,9 @@ namespace AxML {
         virtual void fit(const MatrixR& X) = 0;
         virtual MatrixR transform(const MatrixR& X) const = 0;
         virtual MatrixR fit_transform(const MatrixR& X) = 0;
+        virtual MatrixR inverse_transform(const MatrixR& X) const {
+            throw std::logic_error("inverse_transform not supported by this transformer");
+        }
     };
 
 
