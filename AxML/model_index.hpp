@@ -27,6 +27,7 @@ namespace AxML {
         ID_MLP_CLASSIFIER = 39,
 
         ID_ISOLATION_FOREST = 100,
+        ID_DEEP_ISOLATION_FOREST = 101,
     };
 }
 

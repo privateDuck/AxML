@@ -2,11 +2,7 @@
 
 #ifndef AXML_FEEDFORWARD_BASE_HPP
 #define AXML_FEEDFORWARD_BASE_HPP
-#include <Eigen/Dense>
-#include <vector>
 #include <variant>
-#include <memory>
-#include <functional>
 #include "AxML/common.hpp"
 
 
@@ -78,7 +74,8 @@ namespace AxML::detail {
             for (int i = 0; i < a.rows(); ++i) {
                 // Jacobian: diag(a) - a * a^T
                 Vector ai = a.row(i).transpose();
-                MatrixC jacobian = ai.asDiagonal() - (ai * ai.transpose());
+                MatrixC jacobian = ai.asDiagonal();
+                jacobian.noalias() -= ai * ai.transpose();
                 grad.row(i) = (jacobian * grad_output.row(i).transpose()).transpose();
             }
             return grad;

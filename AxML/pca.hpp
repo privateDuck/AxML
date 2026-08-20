@@ -19,11 +19,19 @@ namespace AxML {
 
         std::unique_ptr<Estimator> clone() const override;
 
-        bool is_fitted() const override;
+        bool is_fitted() const override {
+            return fitted_;
+        }
 
-        uint64_t dims() const override;
+        uint64_t dims() const override {
+            return n_components_;
+        }
 
-        void reset() override;
+        void reset() override {
+            fitted_ = false;
+            scalar_.reset();
+            projection_matrix_.setZero();
+        }
 
         std::string name() const override;
 
@@ -51,7 +59,10 @@ namespace AxML {
             return X_scaled * projection_matrix_;
         }
 
-        MatrixR fit_transform(const MatrixR &X) override;
+        MatrixR fit_transform(const MatrixR &X) override {
+            fit(X);
+            return transform(X);
+        }
 
     private:
         MatrixC projection_matrix_;
