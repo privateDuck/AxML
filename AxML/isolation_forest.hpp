@@ -30,9 +30,12 @@ namespace AxML {
 
         struct ITree {
 
-            void fit(const MatrixC& Xc, const std::span<i32> idx, std::mt19937_64& rgen) {
+            void fit(const MatrixC& Xc, const std::span<i32> idx, std::mt19937_64& rgen, const i32 max_depth) {
+                const i32 est = estimate_max_node_count(idx.size(), max_depth, 1, 1);
+                max_depth_ = max_depth;
+                tree_.initialize(est, 1);
                 build_node(idx, 0, Xc, rgen);
-                ftree_ = tree_.freeze();
+                tree_.freeze();
             }
 
             i32 build_node(const std::span<i32> idx, const i32 depth, const MatrixC& Xc, std::mt19937_64& rgen) {
@@ -75,12 +78,12 @@ namespace AxML {
                 for (i32 row = 0; row < X.rows(); ++row) {
                     i32 node = 0;
                     Scalar sumDepth = 0.0, sumAbsDiff = 0.0;
-                    while (ftree_.children_left_[node] != -1) {
+                    while (tree_.get_left_child_index(node) != -1) {
                         sumDepth += 1.0;
-                        sumAbsDiff += std::abs(X(row, ftree_.feature_[node]) - ftree_.threshold_[node]);
-                        node = X(row, ftree_.feature_[node]) <= ftree_.threshold_[node] ? ftree_.children_left_[node] : ftree_.children_right_[node];
+                        sumAbsDiff += std::abs(X(row, tree_.get_feature_index(node)) - tree_.get_node_threshold(node));
+                        node = X(row, tree_.get_feature_index(node)) <= tree_.get_node_threshold(node) ? tree_.get_left_child_index(node) : tree_.get_right_child_index(node);
                     }
-                    scores(row, 0) += sumDepth + C(ftree_.value_[node]);
+                    scores(row, 0) += sumDepth + C(tree_.get_leaf_value(node)[0]);
                     scores(row, 1) += sumAbsDiff;
                 }
             }
@@ -92,7 +95,6 @@ namespace AxML {
             }
 
             GTree tree_;
-            FrozenTree ftree_;
             i32 max_depth_;
         };
 
@@ -135,27 +137,21 @@ namespace AxML {
                 }
                 scores /= static_cast<Scalar>(trees_.size());
                 final_scores.col(0).segment(start_row, actual_batch_size) = (-scores.col(0).array() / CT).array().exp2() * scores.col(1).array();
-                Vector anomaly_scores = (-scores.col(0).array() / CT).array().exp2() * scores.col(1).array();
             }
 
             if (!get_raw_scores_) {
+                // TODO: Scoring algorithm needs refinement
                 final_scores = final_scores.unaryExpr([&](const double x) { return x >= 0.7 ? 1.0 : 0.0; });
             }
             return final_scores;
         }
 
         MatrixR fit_transform(const MatrixR &X) override {
-            fit(X, Vector()); // Fit with dummy labels
+            fit(X);
             return transform(X);
         }
 
-    protected:
-        void fit_impl(const MatrixR &X, const Vector &y) override {
-            // Do nothing
-        }
-
-    public:
-        void fit(const MatrixR &X, const Vector &y) override {
+        void fit(const MatrixR &X) override {
             const i32 m = X.cols();
             r_dims_ = m < 20 ? m : std::min(m, 32);
             sample_size_ = std::min(sample_size_, static_cast<i32>(X.rows()));
@@ -168,6 +164,7 @@ namespace AxML {
             Vector q = Vector::Zero(r_dims_);
             const MatrixC W0 = MatrixC::NullaryExpr(m, r_dims_, [&](){ return dis(gen); });
             std::vector<MatrixC> Ws(representations_);
+            trees_.resize(representations_ * trees_per_rep_);
 
             for (i32 i = 0; i < representations_; ++i) {
                 p = p.unaryExpr([&](double x) { return dis(gen); });
@@ -190,9 +187,8 @@ namespace AxML {
                 }
 
                 for (i32 t = 0; t < trees_per_rep_; ++t) {
-                    trees_.emplace_back();
-                    trees_.back().max_depth_ = max_depth_;
-                    trees_.back().fit(Xc, full_idx_span.subspan(t * sample_size_, sample_size_), gen);
+                    const size_t tree_idx = trees_per_rep_ * rep + t;
+                    trees_[tree_idx].fit(Xc, full_idx_span.subspan(t * sample_size_, sample_size_), gen, max_depth_);
                 }
             }
 
@@ -206,15 +202,18 @@ namespace AxML {
             return std::make_unique<DeepIsolationForest>(*this);
         }
 
-        bool is_fitted() const override { return true; }
+        bool is_fitted() const override { return is_fitted_; }
 
-        uint64_t dims() const override { return 0; }
+        uint64_t dims() const override { return 1; }
 
-        void reset() override {}
+        void reset() override {
+            trees_.clear();
+            is_fitted_ = false;
+        }
 
-        std::string name() const override { return "IsolationForest"; }
+        std::string name() const override { return "DeepIsolationForest"; }
 
-        uint32_t type_id() const override {return ID_ISOLATION_FOREST; }
+        uint32_t type_id() const override {return ID_DEEP_ISOLATION_FOREST; }
 
     private:
         std::vector<detail::ITree> trees_;
@@ -227,6 +226,94 @@ namespace AxML {
         bool is_fitted_ = false;
     };
 
+
+    class IsolationForest final : public Transformer {
+    public:
+        explicit IsolationForest(const i32 n_estimators = 100,
+            const i32 sample_size = 256, const bool get_raw_scores = false, const uint64_t random_state = 42)
+            : random_state_(random_state), sample_size_(sample_size),
+              n_estimators_(n_estimators), max_depth_(0), get_raw_scores_(get_raw_scores) {}
+
+        void fit(const MatrixR &X) override {
+            sample_size_ = std::min(sample_size_, static_cast<i32>(X.rows()));
+            max_depth_ = static_cast<i32>(std::ceil(std::log2(static_cast<double>(sample_size_))));
+            trees_.resize(n_estimators_);
+
+            std::mt19937_64 gen(random_state_);
+
+            const MatrixC Xc = X;
+            std::vector<i32> indices(sample_size_);
+
+            std::uniform_int_distribution<i32> dist(0, sample_size_ - 1);
+            for (i32 tr = 0; tr < n_estimators_; ++tr) {
+                gen.seed(random_state_ + tr);
+                for (i32 i = 0; i < sample_size_; ++i) {
+                    const i32 idx = dist(gen);
+                    indices[i] = idx;
+                }
+
+                trees_[tr].fit(Xc, std::span(indices), gen, max_depth_);
+            }
+
+            is_fitted_ = true;
+        }
+        MatrixR transform(const MatrixR &X) const override {
+            if ( !is_fitted_ ) {
+                throw std::runtime_error("Model not fitted yet!");
+            }
+            const i32 clvl = std::thread::hardware_concurrency();
+            const i32 batch_size = static_cast<i32>(std::ceil(static_cast<Scalar>(X.rows()) / clvl));
+
+            MatrixR final_scores(X.rows(), 1);
+            const Scalar CT = detail::ITree::C(sample_size_);
+
+            // This loop will be parallelized
+            for (i32 batch = 0; batch < clvl; ++batch) {
+                const i32 start_row = batch * batch_size;
+                const i32 end_row = std::min(start_row + batch_size, static_cast<i32>(X.rows()));
+                const i32 actual_batch_size = end_row - start_row;
+                if (start_row >= end_row) break;
+
+                MatrixC scores(actual_batch_size, 2);
+                const auto subX = X.middleRows(start_row, actual_batch_size);
+                for (const auto& tree : trees_) {
+                    tree.score_aggregate(subX, scores);
+                }
+                scores /= static_cast<Scalar>(trees_.size());
+                final_scores.col(0).segment(start_row, actual_batch_size) = (-scores.col(0).array() / CT).array().exp2();
+            }
+
+            if (!get_raw_scores_) {
+                // TODO: Scoring algorithm needs refinement
+                final_scores = final_scores.unaryExpr([&](const double x) { return x >= 0.7 ? 1.0 : 0.0; });
+            }
+            return final_scores;
+        }
+        MatrixR fit_transform(const MatrixR &X) override;
+
+        void save(OutputArchive &ar) const override;
+        void load(InputArchive &ar) override;
+
+        std::unique_ptr<Estimator> clone() const override;
+
+        bool is_fitted() const override { return is_fitted_; }
+        uint64_t dims() const override { return 1; }
+        void reset() override {
+            trees_.clear();
+            is_fitted_ = false;
+        }
+        std::string name() const override { return "IsolationForest"; }
+        uint32_t type_id() const override { return ID_ISOLATION_FOREST; }
+
+    private:
+        std::vector<detail::ITree> trees_;
+        uint64_t random_state_;
+        i32 sample_size_;
+        i32 n_estimators_;
+        i32 max_depth_;
+        bool is_fitted_ = false;
+        bool get_raw_scores_ = false;
+    };
 
 }
 
