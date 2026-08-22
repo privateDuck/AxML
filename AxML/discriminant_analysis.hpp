@@ -10,7 +10,7 @@ namespace AxML {
 
     class LinearDiscriminantAnalysis final : public Classifier {
     public:
-        explicit LinearDiscriminantAnalysis() = default;
+        explicit LinearDiscriminantAnalysis(const bool compute_exact_log_proba = false) : compute_exact_log_proba_(compute_exact_log_proba) {}
 
         void save(OutputArchive &ar) const override {}
 
@@ -22,10 +22,9 @@ namespace AxML {
 
         [[nodiscard]] uint64_t dims() const override { return num_features_; }
         void reset() override {
-            means_.setZero();
-            log_priors_.setZero();
+            W_.setZero();
+            b_.setZero();
             precision_tensor_.setZero();
-            log_det_cov_ = 0;
             is_fitted_ = false;
         }
 
@@ -63,6 +62,17 @@ namespace AxML {
             return logits;
         }
 
+        [[nodiscard]] MatrixR predict_log_proba(const MatrixR &X) const {
+            MatrixR log_proba = (X * W_).rowwise() + b_.transpose();
+
+            if (compute_exact_log_proba_) {
+                const Vector x_quad = -0.5 * (X * precision_tensor_).cwiseProduct(X).rowwise().sum();
+                log_proba.colwise() += x_quad;
+            }
+
+            return log_proba;
+        }
+
     protected:
         [[nodiscard]] const LabelEncoderInternal &get_encoder_() const override {
             return encoder_;
@@ -75,6 +85,11 @@ namespace AxML {
 
             num_classes_ = encoder_.num_unique_labels();
             num_features_ = static_cast<i32>(X.cols());
+
+            MatrixC means_;               // (C, F)
+            Vector log_priors_;               // (C)
+            // (F, F)
+            Scalar log_det_cov_{};        // (1)
 
             const i32 N = static_cast<i32>(X.rows());
             means_.resize(num_classes_, num_features_);
@@ -122,55 +137,24 @@ namespace AxML {
             // log(det(cov)) = 2 * sum(log(diag(L)))
             log_det_cov_ = 2.0 * L.diagonal().array().log().sum();
 
+            // W = Sigma^-1 * mu^t (F, C)
+            // b = -0.5 * mu^t * sigma^-1 * mu + log(priors) + const (C)
+            W_ = precision_tensor_ * means_.transpose();
+            b_ = Vector::Zero(num_classes_);
+            constexpr Scalar log_2pi = 1.8378770664093454835606594728112; // ln(2 * pi)
+            const Scalar constant_term = -0.5f * (log_det_cov_ + static_cast<Scalar>(num_features_) * log_2pi);
+            for (i32 c = 0; c < num_classes_; ++c) {
+                b_(c) = -0.5 * means_.row(c).dot(W_.col(c)) + log_priors_(c) + constant_term;
+            }
+
+            if (!compute_exact_log_proba_) {
+                precision_tensor_.resize(0,0);
+            }
+
             is_fitted_ = true;
         }
 
     private:
-
-        [[nodiscard]] MatrixR predict_log_proba(const MatrixR &X) const {
-            const auto dim = static_cast<Scalar>(num_features_);
-            constexpr Scalar log_2pi = 1.8378770664093454835606594728112; // ln(2 * pi)
-            const Scalar constant_term = -0.5f * (log_det_cov_ + dim * log_2pi);
-
-            MatrixR log_proba(X.rows(), num_classes_);
-            MatrixR diff(X.rows(), num_features_);
-
-            for (i32 i = 0; i < num_classes_; ++i) {
-                diff.noalias() = X.rowwise() - means_.row(i);
-                auto mahalanobis = (diff * precision_tensor_).cwiseProduct(diff).rowwise().sum();
-                log_proba.col(i).array() = (-0.5 * mahalanobis).array() + log_priors_(i) + constant_term;
-            }
-            return log_proba;
-            /*
-            // Term A: x^T * Sigma^-1 * x -> (batch, 1)
-            MatrixC X_P = X.transpose() * precision_tensor_;
-            const Vector term_x = (X_P.array() * X.array()).rowwise().sum();
-
-            // Term B: mu^T * Sigma^-1 * mu -> (C)
-            MatrixC Means_P = means_.transpose() * precision_tensor_;
-            Vector term_mu = (Means_P.array() * means_.array()).rowwise().sum();
-
-            // Term C: -2 * x^T * Sigma^-1 * mu -> (batch, C)
-            const MatrixC term_interaction = -2.0f * (X_P * means_.transpose());
-
-            // Mahalanobis Distance
-            MatrixC mahalanobis_sq = term_x.replicate(1, num_classes_);
-            for (int c = 0; c < num_classes_; ++c) {
-                mahalanobis_sq.col(c).array() += term_mu(c);
-            }
-            mahalanobis_sq += term_interaction;
-
-            MatrixR log_likelihood = constant_term - static_cast<Scalar>(0.5) * mahalanobis_sq.array();
-
-            // Add priors
-            for (int c = 0; c < num_classes_; ++c) {
-                log_likelihood.col(c).array() += priors_(c);
-            }
-
-            return log_likelihood;
-            */
-        }
-
         static void softmax_inplace(MatrixR& logits) {
             for (i32 row = 0; row < logits.rows(); ++row) {
                 auto max_val = logits.row(row).maxCoeff();
@@ -180,25 +164,30 @@ namespace AxML {
         }
 
         LabelEncoderInternal encoder_;
+        MatrixC precision_tensor_;    // (F, F)
+        /*
         MatrixC means_;               // (C, F)
         Vector log_priors_;               // (C)
-        MatrixC precision_tensor_;    // (F, F)
         Scalar log_det_cov_{};        // (1)
+        */
+        MatrixC W_;
+        Vector b_;
         i32 num_classes_{};
         i32 num_features_{};
         bool is_fitted_ = false;
+        bool compute_exact_log_proba_ = false;
     };
 
     class QuadraticDiscriminantAnalysis final : public Classifier {
     public:
         explicit QuadraticDiscriminantAnalysis(const bool is_naive_bayes = false) : is_naive_bayes_(is_naive_bayes) {}
 
-        bool supports_predict_proba() const noexcept override { return true; }
+        [[nodiscard]] bool supports_predict_proba() const noexcept override { return true; }
         void save(OutputArchive &ar) const override{}
 
         void load(InputArchive &ar) override{}
 
-        std::unique_ptr<Estimator> clone() const override{return std::make_unique<QuadraticDiscriminantAnalysis>(*this);}
+        [[nodiscard]] std::unique_ptr<Estimator> clone() const override{return std::make_unique<QuadraticDiscriminantAnalysis>(*this);}
 
         void reset() override {
             means.setZero();
@@ -257,7 +246,7 @@ namespace AxML {
             num_classes_ = encoder_.num_unique_labels();
             num_features_ = static_cast<i32>(X.cols());
 
-            const i32 N = X.rows();
+            const i32 N = static_cast<i32>(X.rows());
 
             means.resize(num_classes_, num_features_);
             priors.resize(num_classes_);
@@ -297,7 +286,7 @@ namespace AxML {
                     log_det_covs(c) = 2.0 * L.diagonal().array().log().sum();
                 }else {
                     // Naive Bayes: Diagonal covariance matrix (just variances)
-                    Vector var = (centered.array().square().colwise().sum()) / (N_c - 1.0f);
+                    Vector var = (centered.array().square().colwise().sum()) / (static_cast<Scalar>(N_c) - 1.0);
                     var.array() += 1e-6;
                     nb_variances.row(c) = var;
 
@@ -309,9 +298,9 @@ namespace AxML {
             is_fitted_ = true;
         }
 
-        MatrixR predict_log_proba(const MatrixR &X) const {
-            const i32 rows = X.rows();
-            const Scalar dim = static_cast<Scalar>(num_features_);
+        [[nodiscard]] MatrixR predict_log_proba(const MatrixR &X) const {
+            const i32 rows = static_cast<i32>(X.rows());
+            const auto dim = static_cast<Scalar>(num_features_);
 
             MatrixR log_likelihood = MatrixR::Zero(rows, num_classes_);
 

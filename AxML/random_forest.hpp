@@ -11,92 +11,122 @@ namespace AxML {
 
     class RandomForestClassifier final : public Classifier {
     public:
-        explicit RandomForestClassifier(
-            const int32_t n_estimators = 100, const int32_t max_depth = -1,
-            const int32_t min_samples_split = 2, const int32_t min_samples_leaf = 1,
-            const MaxFeatures max_features = MaxFeatures::Sqrt, const int32_t n_threads = -1, const bool bootstrap = true, const int32_t bootstrap_size = -1,
-            const uint64_t random_state = 42)
-            : random_state_(random_state), bootstrap_size_(bootstrap_size), n_trees_(n_estimators),
-              max_depth_(max_depth), min_samples_split_(min_samples_split),
-              min_samples_leaf_(min_samples_leaf), n_threads_(n_threads), max_features_(max_features), bootstrap_(bootstrap) {}
+        explicit RandomForestClassifier(const RandomForestParams& params)
+            : random_state_(params.random_state), bootstrap_size_(params.bootstrap_size), n_trees_(params.n_estimators),
+              max_depth_(params.max_depth), min_samples_split_(params.min_samples_split),
+              min_samples_leaf_(params.min_samples_leaf), n_threads_(params.n_threads), max_features_(params.get_mf()), bootstrap_(params.enable_bootstrap) {}
 
         void fit(const MatrixR &X, const VectorI &y) override {
             if (X.rows() != y.size()) {
                 throw std::invalid_argument("Size mismatch. X.rows() must be equal to y.size()");
             }
 
-            n_samples_ = X.rows();
-            d_ = X.cols();
+            n_samples_ = static_cast<i32>(X.rows());
+            d_ = static_cast<i32>(X.cols());
             if (bootstrap_size_ < 1 || bootstrap_size_ > n_samples_) bootstrap_size_ = n_samples_;
 
-            const int32_t n_workers = n_threads_ <= 0 ? std::thread::hardware_concurrency() : std::min(n_threads_, static_cast<i32>(std::thread::hardware_concurrency()));
-            const int32_t chunk_size = static_cast<int32_t>(std::ceil(static_cast<float>(n_trees_) / static_cast<float>(n_workers)));
+            const u32 n_workers = n_threads_ <= 0 ? std::thread::hardware_concurrency() : std::min(n_threads_, static_cast<i32>(std::thread::hardware_concurrency()));
+            const u32 chunk_size = static_cast<u32>(std::ceil(static_cast<float>(n_trees_) / static_cast<float>(n_workers)));
 
             auto [Xc, y_enc, encoder] = DecisionTreeClassifier::prepare_shared_data(X, y);
             encoder_ = std::make_shared<LabelEncoderInternal>(std::move(encoder));
 
-            for (int32_t i = 0; i < n_trees_; ++i) {
-                trees_.emplace_back(max_depth_, min_samples_split_, min_samples_leaf_, max_features_, random_state_ + i);
+            DecisionTreeParams params;
+            params.max_depth = max_depth_;
+            params.min_samples_leaf = min_samples_leaf_;
+            params.min_samples_split = min_samples_split_;
+            params.max_features = DecisionTreeParams::get_mf_str(max_features_);
+            params.random_state = random_state_;
+            for (int32_t i = 1; i <= n_trees_; ++i) {
+                params.random_state += i;
+                trees_.emplace_back(params);
             }
 
-            std::vector<std::jthread> workers;
-            workers.reserve(n_workers);
-            std::exception_ptr exception_ptr = nullptr;
+            detail::TreeCapacityParams tcp;
+            tcp.maxDepth = max_depth_;
+            tcp.minSamplesLeaf = min_samples_leaf_;
+            tcp.minSamplesSplit = min_samples_split_;
+            tcp.sampleCount = y_enc.size();
 
-            for (int32_t i = 0; i < n_workers; ++i) {
-                const size_t start_idx = i * chunk_size;
-                if (start_idx >= n_trees_) break;
-                const size_t end_idx = std::min(start_idx + chunk_size, static_cast<size_t>(n_trees_));
+            const auto est_nodes = detail::estimate_tree_capacity(tcp);
 
-                workers.emplace_back([this, start_idx, end_idx, &Xc, &y_enc, &exception_ptr]() {
-                    try {
-                        std::array<std::byte, 8192> local_buffer;
-                        std::pmr::monotonic_buffer_resource mbr(local_buffer.data(), local_buffer.size(), std::pmr::new_delete_resource());
-                        std::pmr::unsynchronized_pool_resource async_res(&mbr);
+            if (n_threads_ != 1) {
 
-                        detail::TreeCapacityParams tcp;
-                        tcp.maxDepth = max_depth_;
-                        tcp.minSamplesLeaf = min_samples_leaf_;
-                        tcp.minSamplesSplit = min_samples_split_;
-                        tcp.sampleCount = y_enc.size();
+                std::vector<std::jthread> workers;
+                workers.reserve(n_workers);
+                std::exception_ptr exception_ptr = nullptr;
 
-                        const auto est_nodes = detail::estimate_tree_capacity(tcp);
+                for (int32_t i = 0; i < n_workers; ++i) {
+                    const size_t start_idx = i * chunk_size;
+                    if (start_idx >= n_trees_) break;
+                    const size_t end_idx = std::min(start_idx + chunk_size, static_cast<size_t>(n_trees_));
 
-                        for (size_t t = start_idx; t < end_idx; ++t) {
-                            std::vector<int32_t> indices;
+                    workers.emplace_back([this, start_idx, end_idx, est_nodes, &Xc, &y_enc, &exception_ptr]() {
+                        try {
+                            std::array<std::byte, 8192> local_buffer{};
+                            std::pmr::monotonic_buffer_resource mbr(local_buffer.data(), local_buffer.size(), std::pmr::new_delete_resource());
+                            std::pmr::unsynchronized_pool_resource async_res(&mbr);
 
-                            if (bootstrap_) {
-                                std::mt19937 gen(random_state_ + t);
-                                std::uniform_int_distribution<int32_t> dist(0, n_samples_ - 1);
-                                indices.resize(bootstrap_size_);
-                                for (int32_t j = 0; j < bootstrap_size_; ++j) {
-                                    indices[j] = dist(gen);
+                            for (size_t t = start_idx; t < end_idx; ++t) {
+                                std::vector<int32_t> indices;
+                                std::mt19937_64 gen(random_state_ + t);
+
+                                if (bootstrap_) {
+                                    std::uniform_int_distribution<int32_t> dist(0, n_samples_ - 1);
+                                    indices.resize(bootstrap_size_);
+                                    for (int32_t j = 0; j < bootstrap_size_; ++j) {
+                                        indices[j] = dist(gen);
+                                    }
                                 }
-                            }
-                            else {
-                                indices.resize(n_samples_);
-                                std::iota(indices.begin(), indices.end(), 0);
-                            }
+                                else {
+                                    indices.resize(n_samples_);
+                                    std::iota(indices.begin(), indices.end(), 0);
+                                }
 
-                            trees_[t].fit_shared(Xc, y_enc, encoder_, std::move(indices), est_nodes, &async_res);
+                                trees_[t].fit_shared(Xc, y_enc, encoder_, std::move(indices), est_nodes, &async_res, gen);
+                            }
+                        }
+                        catch (...) {
+                            exception_ptr = std::current_exception();
+                        }
+                    });
+                }
+
+                if (exception_ptr) {
+                    std::rethrow_exception(exception_ptr);
+                }
+            }
+            else {
+                std::array<std::byte, 8192> local_buffer{};
+                std::pmr::monotonic_buffer_resource mbr(local_buffer.data(), local_buffer.size(), std::pmr::new_delete_resource());
+                std::pmr::unsynchronized_pool_resource async_res(&mbr);
+
+                for (size_t t = 0; t < n_trees_; ++t) {
+                    std::vector<int32_t> indices;
+                    std::mt19937_64 gen(random_state_ + t);
+
+                    if (bootstrap_) {
+                        std::uniform_int_distribution<int32_t> dist(0, n_samples_ - 1);
+                        indices.resize(bootstrap_size_);
+                        for (int32_t j = 0; j < bootstrap_size_; ++j) {
+                            indices[j] = dist(gen);
                         }
                     }
-                    catch (...) {
-                        exception_ptr = std::current_exception();
+                    else {
+                        indices.resize(n_samples_);
+                        std::iota(indices.begin(), indices.end(), 0);
                     }
-                });
-            }
 
-            if (exception_ptr) {
-                std::rethrow_exception(exception_ptr);
+                    trees_[t].fit_shared(Xc, y_enc, encoder_, std::move(indices), est_nodes, &async_res, gen);
+                }
             }
         }
 
-        VectorI predict(const MatrixR &X) const override {
+        [[nodiscard]] VectorI predict(const MatrixR &X) const override {
             if (X.cols() != d_) {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", d_, X.cols()));
             }
-            if (trees_.size() == 0) {
+            if (trees_.empty()) {
                 throw std::runtime_error("Model not fitted yet!");
             }
             MatrixR preds = MatrixR::Zero(X.rows(), encoder_->num_unique_labels());
@@ -112,11 +142,11 @@ namespace AxML {
             return arg_max;
         }
 
-        MatrixR predict_proba(const MatrixR &X) const override {
+        [[nodiscard]] MatrixR predict_proba(const MatrixR &X) const override {
             if (X.cols() != d_) {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", d_, X.cols()));
             }
-            if (trees_.size() == 0) {
+            if (trees_.empty()) {
                 throw std::runtime_error("Model not fitted yet!");
             }
             MatrixR preds = MatrixR::Zero(X.rows(), encoder_->num_unique_labels());
@@ -127,19 +157,19 @@ namespace AxML {
             return preds;
         }
 
-        void save(OutputArchive &ar) const override;
-        void load(InputArchive &ar) override;
-        std::unique_ptr<Estimator> clone() const override;
+        void save(OutputArchive &ar) const override{}
+        void load(InputArchive &ar) override{}
+        [[nodiscard]] std::unique_ptr<Estimator> clone() const override {return std::make_unique<RandomForestClassifier>(*this);}
 
-        void reset() override;
+        void reset() override{trees_.clear();}
 
-        std::string name() const override { return "RandomForestClassifier"; }
-        uint32_t type_id() const override { return ID_RF_CLASSIFIER; }
+        [[nodiscard]] std::string name() const override { return "RandomForestClassifier"; }
+        [[nodiscard]] uint32_t type_id() const override { return ID_RF_CLASSIFIER; }
 
-        bool is_fitted() const override {
+        [[nodiscard]] bool is_fitted() const override {
             return n_trees_ > 0;
         }
-        uint64_t dims() const override {
+        [[nodiscard]] uint64_t dims() const override {
             if (trees_.empty()) {
                 return 0;
             }
@@ -147,7 +177,7 @@ namespace AxML {
         }
 
     protected:
-        const LabelEncoderInternal &get_encoder_() const override {
+        [[nodiscard]] const LabelEncoderInternal &get_encoder_() const override {
             return *encoder_;
         }
 
@@ -167,37 +197,39 @@ namespace AxML {
         int32_t min_samples_split_;
         int32_t min_samples_leaf_;
         int32_t n_threads_;
-        MaxFeatures max_features_;
+        i32 max_features_;
         bool bootstrap_;
     };
 
 
     class RandomForestRegressor final : public Regressor {
     public:
-        explicit RandomForestRegressor(
-            const int32_t n_estimators = 100, const int32_t max_depth = -1,
-            const int32_t min_samples_split = 2, const int32_t min_samples_leaf = 1,
-            const MaxFeatures max_features = MaxFeatures::Sqrt, const int32_t n_threads = -1, const bool bootstrap = true, const int32_t bootstrap_size = -1,
-            const uint64_t random_state = 42)
-            : random_state_(random_state), bootstrap_size_(bootstrap_size), n_trees_(n_estimators),
-              max_depth_(max_depth), min_samples_split_(min_samples_split),
-              min_samples_leaf_(min_samples_leaf), n_threads_(n_threads), max_features_(max_features), bootstrap_(bootstrap) {}
+        explicit RandomForestRegressor(const RandomForestParams& params)
+            : random_state_(params.random_state), bootstrap_size_(params.bootstrap_size), n_trees_(params.n_estimators),
+              max_depth_(params.max_depth), min_samples_split_(params.min_samples_split),
+              min_samples_leaf_(params.min_samples_leaf), n_threads_(params.n_threads), max_features_(params.get_mf()), bootstrap_(params.enable_bootstrap) {}
 
         void fit(const MatrixR &X, const Vector &y) override {
             if (X.rows() != y.size()) {
                 throw std::invalid_argument("Size mismatch. X.rows() must be equal to y.size()");
             }
 
-            n_samples_ = X.rows();
+            n_samples_ = static_cast<i32>(X.rows());
             if (bootstrap_size_ < 1 || bootstrap_size_ > n_samples_) bootstrap_size_ = n_samples_;
 
-            const int32_t n_workers = n_threads_ <= 0 ? std::thread::hardware_concurrency() : std::min(n_threads_, static_cast<i32>(std::thread::hardware_concurrency()));
-            const int32_t chunk_size = static_cast<int32_t>(std::ceil(static_cast<float>(n_trees_) / static_cast<float>(n_workers)));
+            const u32 n_workers = n_threads_ <= 0 ? std::thread::hardware_concurrency() : std::min(n_threads_, static_cast<i32>(std::thread::hardware_concurrency()));
+            const u32 chunk_size = static_cast<u32>(std::ceil(static_cast<float>(n_trees_) / static_cast<float>(n_workers)));
 
             MatrixC Xc = X;
-
-            for (int32_t i = 0; i < n_trees_; ++i) {
-                trees_.emplace_back(max_depth_, min_samples_split_, min_samples_leaf_, max_features_, random_state_ + i);
+            DecisionTreeParams params;
+            params.max_depth = max_depth_;
+            params.min_samples_leaf = min_samples_leaf_;
+            params.min_samples_split = min_samples_split_;
+            params.max_features = DecisionTreeParams::get_mf_str(max_features_);
+            params.random_state = random_state_;
+            for (int32_t i = 1; i <= n_trees_; ++i) {
+                params.random_state += i;
+                trees_.emplace_back(params);
             }
 
             std::vector<std::jthread> workers(n_workers);
@@ -208,7 +240,7 @@ namespace AxML {
                 const size_t end_idx = std::min(start_idx + chunk_size, static_cast<size_t>(n_trees_));
 
                 workers.emplace_back([this, start_idx, end_idx, &Xc, &y]() {
-                    std::array<std::byte, 8192> local_buffer;
+                    std::array<std::byte, 8192> local_buffer{};
                     std::pmr::monotonic_buffer_resource mbr(local_buffer.data(), local_buffer.size(), std::pmr::new_delete_resource());
                     std::pmr::unsynchronized_pool_resource async_res(&mbr);
 
@@ -222,9 +254,9 @@ namespace AxML {
 
                     for (size_t t = start_idx; t < end_idx; ++t) {
                         std::vector<int32_t> indices;
+                        std::mt19937_64 gen(random_state_ + t);
 
                         if (bootstrap_) {
-                            std::mt19937 gen(random_state_ + t);
                             std::uniform_int_distribution<int32_t> dist(0, n_samples_ - 1);
                             indices.resize(bootstrap_size_);
                             for (int32_t j = 0; j < bootstrap_size_; ++j) {
@@ -236,17 +268,17 @@ namespace AxML {
                             std::iota(indices.begin(), indices.end(), 0);
                         }
 
-                        trees_[t].fit_shared(Xc, y, std::move(indices), est_nodes, &async_res);
+                        trees_[t].fit_shared(Xc, y, std::move(indices), est_nodes, &async_res, gen);
                     }
                 });
             }
         }
 
-        Vector predict(const MatrixR &X) const override {
+        [[nodiscard]] Vector predict(const MatrixR &X) const override {
             if (X.cols() != dims()) {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", dims(), X.cols()));
             }
-            if (trees_.size() == 0) {
+            if (trees_.empty()) {
                 throw std::runtime_error("Model not fitted yet!");
             }
             Vector preds = Vector::Zero(X.rows());
@@ -257,19 +289,19 @@ namespace AxML {
             return preds;
         }
 
-        void save(OutputArchive &ar) const override;
-        void load(InputArchive &ar) override;
-        std::unique_ptr<Estimator> clone() const override;
+        void save(OutputArchive &ar) const override{}
+        void load(InputArchive &ar) override{}
+        [[nodiscard]] std::unique_ptr<Estimator> clone() const override {return std::make_unique<RandomForestRegressor>(*this);}
 
-        void reset() override;
+        void reset() override{trees_.clear();}
 
-        std::string name() const override { return "RandomForestRegressor"; }
-        uint32_t type_id() const override { return ID_RF_REGRESSION; }
+        [[nodiscard]] std::string name() const override { return "RandomForestRegressor"; }
+        [[nodiscard]] uint32_t type_id() const override { return ID_RF_REGRESSION; }
 
-        bool is_fitted() const override {
+        [[nodiscard]] bool is_fitted() const override {
             return n_trees_ > 0;
         }
-        uint64_t dims() const override {
+        [[nodiscard]] uint64_t dims() const override {
             if (trees_.empty()) {
                 return 0;
             }
@@ -291,7 +323,7 @@ namespace AxML {
         int32_t min_samples_split_;
         int32_t min_samples_leaf_;
         int32_t n_threads_;
-        MaxFeatures max_features_;
+        i32 max_features_;
         bool bootstrap_;
     };
 

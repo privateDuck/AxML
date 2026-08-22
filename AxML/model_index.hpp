@@ -28,6 +28,8 @@ namespace AxML {
 
         ID_ISOLATION_FOREST = 100,
         ID_DEEP_ISOLATION_FOREST = 101,
+
+        ID_KMEANS = 200,
     };
 }
 

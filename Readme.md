@@ -25,11 +25,11 @@
 * Principal Component Analysis (PCA)
 * Autoencoder
 * UMAP (Uniform Manifold Approximation and Projection)
-* Standard Scaler
-* Min-Max Scaler
+* Standard Scaler (done)
+* Min-Max Scaler (done)
 
-### Stateless Transformation Models
-* Isolation Forest (DIP - Partially, IP - Started)
+### Unsupervised Models - Considered as Transformers in the codebase
+* Isolation Forest (DIP - Single Threaded, IP - Single Threaded)
 * K-Means Clustering
 * Agglomerative Clustering
 

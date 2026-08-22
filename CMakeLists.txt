@@ -17,7 +17,7 @@ target_include_directories(AxML
 
 # Development translation unit
 add_executable(AxML_dev
-        main_dev.cpp
+        test/main.cpp
 )
 
 target_link_libraries(AxML_dev
@@ -27,3 +27,4 @@ target_link_libraries(AxML_dev
 
 # Tests
 add_subdirectory(test)
+add_subdirectory(cuda)

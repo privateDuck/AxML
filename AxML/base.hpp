@@ -7,6 +7,7 @@
 #include "common.hpp"
 #include "label_encoder.hpp"
 #include "metrics.hpp"
+#include "param_config.hpp"
 
 namespace AxML {
     class OutputArchive;

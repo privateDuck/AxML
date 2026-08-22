@@ -12,7 +12,7 @@ namespace AxML {
 
     class LinearSVC : public Classifier {
     public:
-        explicit LinearSVC(const Scalar C = 1.0f, const int64_t max_iter = 10000, const Scalar tolerance = 1e-6) :
+        explicit LinearSVC(const Scalar C = 1.0, const int64_t max_iter = 10000, const Scalar tolerance = 1e-6) :
         reg_fn_(detail::L2Regularization(2.0f / C)), tol_(tolerance),
         C_(C), max_iter_(max_iter), fitted_(false) {
         }
@@ -143,7 +143,7 @@ namespace AxML {
     class RBFSVC : public Classifier {
     public:
         explicit RBFSVC(
-            const Scalar gamma = 1.0f, const Scalar C = 1.0f, const uint32_t rf_features = 100,
+            const Scalar gamma = 1.0, const Scalar C = 1.0, const uint32_t rf_features = 100,
             const int64_t max_iter = 10000, const Scalar tolerance = 1e-6) :
         linear_svc_(C, max_iter, tolerance), gamma_(gamma), C_(C), rf_features_(rf_features) {}
 

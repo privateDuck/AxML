@@ -3,7 +3,6 @@
 #define AXML_DECISION_TREE_HPP
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <numeric>
@@ -70,7 +69,7 @@ namespace AxML {
 
         // Partial Fisher-Yates. After any call, all_features is still a permutation
         // of [0, d), so no re-seeding/reallocation is needed between calls.
-        inline void sample_features_inplace(std::vector<i32>& all_features, const i32 k, std::mt19937& rng) {
+        inline void sample_features_inplace(std::vector<i32>& all_features, const i32 k, std::mt19937_64& rng) {
             const i32 d = static_cast<i32>(all_features.size());
             for (i32 i = 0; i < k; ++i) {
                 std::uniform_int_distribution<i32> dist(i, d - 1);
@@ -103,20 +102,17 @@ namespace AxML {
     using vec = std::vector<T>;
 
     public:
-        explicit DecisionTreeClassifier(
-            const i32 max_depth = -1, const i32 min_samples_split = 2,
-            const i32 min_samples_leaf = 1, const MaxFeatures max_features = MaxFeatures::Sqrt,
-            const uint64_t random_state = 42) :
-        max_depth_(max_depth),
-        min_samples_split_(min_samples_split),
-        min_samples_leaf_(min_samples_leaf),
-        max_features_(static_cast<i32>(max_features)),
-        random_state_(random_state)
+        explicit DecisionTreeClassifier(const DecisionTreeParams& params) :
+        max_depth_(params.max_depth),
+        min_samples_split_(params.min_samples_split),
+        min_samples_leaf_(params.min_samples_leaf),
+        max_features_(params.get_mf()),
+        random_state_(params.random_state)
         {}
 
         void fit(const MatrixR& X, const VectorI& y) override {
             auto [Xc, y_enc, encoder] = prepare_shared_data(X, y);
-            std::array<std::byte, 8192> local_buffer;
+            std::array<std::byte, 8192> local_buffer{};
             std::pmr::monotonic_buffer_resource mbr(local_buffer.data(), local_buffer.size(), std::pmr::new_delete_resource());
             std::pmr::unsynchronized_pool_resource async_res(&mbr);
 
@@ -130,25 +126,25 @@ namespace AxML {
             tcp.sampleCount = y.size();
 
             const auto est_nodes = detail::estimate_tree_capacity(tcp);
-
-            fit_shared(Xc, y_enc, std::make_shared<LabelEncoderInternal>(encoder), std::move(indices), est_nodes, &async_res);
+            std::mt19937_64 rng(random_state_);
+            fit_shared(Xc, y_enc, std::make_shared<LabelEncoderInternal>(encoder), std::move(indices), est_nodes, &async_res, rng);
         }
 
         // Unsafe methods. These do not check for the validity of the inputs or the state of the model
         // NOT RECOMMENDED FOR PUBLIC USE
-        i32 predict_label(const MatrixR& X, const i32 row) const {
+        [[nodiscard]] i32 predict_label(const MatrixR& X, const i32 row) const {
             auto proba = tree_.get_leaf_value(predict_node(X, row));
             const auto best = std::ranges::max_element(proba);
             return encoder_->inverse_transform(static_cast<i32>(best - proba.begin()));
         }
 
-        i32 predict_label(const Eigen::RowVectorX<Scalar>& X) const {
+        [[nodiscard]] i32 predict_label(const Eigen::RowVectorX<Scalar>& X) const {
             auto proba = tree_.get_leaf_value(predict_node(X));
             const auto best = std::ranges::max_element(proba);
             return encoder_->inverse_transform(static_cast<i32>(best - proba.begin()));
         }
 
-        VectorI predict(const MatrixR& X) const override {
+        [[nodiscard]] VectorI predict(const MatrixR& X) const override {
             if (X.cols() != dims()) {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", d_, X.cols()));
             }
@@ -162,7 +158,7 @@ namespace AxML {
             return output;
         }
 
-        MatrixR predict_proba(const MatrixR& X) const override {
+        [[nodiscard]] MatrixR predict_proba(const MatrixR& X) const override {
             if (X.cols() != dims()) {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", d_, X.cols()));
             }
@@ -178,9 +174,15 @@ namespace AxML {
             return proba;
         }
 
-        void save(OutputArchive &ar) const override;
-        void load(InputArchive &ar) override;
-        std::unique_ptr<Estimator> clone() const override;
+        void save(OutputArchive &ar) const override {
+
+        }
+        void load(InputArchive &ar) override {
+
+        }
+        [[nodiscard]] std::unique_ptr<Estimator> clone() const override {
+            return std::make_unique<DecisionTreeClassifier>(*this);
+        }
 
         void reset() override {
             tree_.reset();
@@ -189,16 +191,16 @@ namespace AxML {
             fitted_ = false;
         }
 
-        std::string name() const override { return "DecisionTreeClassifier"; }
-        uint32_t type_id() const override { return ID_DT_CLASSIFIER; }
+        [[nodiscard]] std::string name() const override { return "DecisionTreeClassifier"; }
+        [[nodiscard]] uint32_t type_id() const override { return ID_DT_CLASSIFIER; }
 
-        i32 n_nodes() const { return tree_.get_num_nodes(); }
-        uint64_t dims() const override {return d_;}
-        bool is_fitted() const override {return fitted_;}
+        [[nodiscard]] i32 n_nodes() const { return tree_.get_num_nodes(); }
+        [[nodiscard]] uint64_t dims() const override {return d_;}
+        [[nodiscard]] bool is_fitted() const override {return fitted_;}
     private:
         friend RandomForestClassifier;
 
-        const LabelEncoderInternal &get_encoder_() const override {
+        [[nodiscard]] const LabelEncoderInternal &get_encoder_() const override {
             return *encoder_;
         }
 
@@ -209,7 +211,7 @@ namespace AxML {
         void fit_shared(const MatrixC& Xc, const vec<i32>& y_enc,
             const std::shared_ptr<LabelEncoderInternal> &encoder,
             std::vector<i32> initial_indices, const size_t est_nodes,
-            std::pmr::memory_resource* pool_res) {
+            std::pmr::memory_resource* pool_res, std::mt19937_64& rng_) {
 
             d_ = static_cast<i32>(Xc.cols());
             encoder_ = encoder;
@@ -225,7 +227,7 @@ namespace AxML {
             rng_.seed(random_state_);
             tree_.initialize(est_nodes, n_classes_);
 
-            build_node(std::span<i32>(sample_indices_), 0, Xc, y_enc, pool_res);
+            build_node(std::span<i32>(sample_indices_), 0, Xc, y_enc, pool_res, rng_);
 
             tree_.freeze();
             fitted_ = true;
@@ -245,7 +247,7 @@ namespace AxML {
             return {std::move(Xc), std::move(y_enc), std::move(encoder_internal)};
         }
 
-        i32 predict_node(const MatrixR& X, const i32 row) const {
+        [[nodiscard]] i32 predict_node(const MatrixR& X, const i32 row) const {
             i32 node = 0;
             while (tree_.get_left_child_index(node) != -1) {
                 node = X(row, tree_.get_feature_index(node)) <= tree_.get_node_threshold(node)
@@ -255,7 +257,7 @@ namespace AxML {
             return node;
         }
 
-        i32 predict_node(const Eigen::RowVectorX<Scalar>& X) const {
+        [[nodiscard]] i32 predict_node(const Eigen::RowVectorX<Scalar>& X) const {
             i32 node = 0;
             while (tree_.get_left_child_index(node) != -1) {
                 node = (X(tree_.get_feature_index(node)) <= tree_.get_node_threshold(node)) ? tree_.get_left_child_index(node) : tree_.get_right_child_index(node);
@@ -270,7 +272,7 @@ namespace AxML {
             }
         }
 
-        i32 build_node(const std::span<i32> idx, const i32 depth, const MatrixC& Xc, const vec<i32>& y_enc, std::pmr::memory_resource* pool_res) {
+        i32 build_node(const std::span<i32> idx, const i32 depth, const MatrixC& Xc, const vec<i32>& y_enc, std::pmr::memory_resource* pool_res, std::mt19937_64& rng_) {
             const i32 node_id = tree_.new_node();
             const i32 n_node = static_cast<i32>(idx.size());
 
@@ -305,8 +307,8 @@ namespace AxML {
             }
 
             const i32 mid = detail::partition_span(idx, Xc, best.feature, best.threshold);
-            const auto left_id = build_node(idx.subspan(0, mid), depth + 1, Xc, y_enc, pool_res);
-            const auto right_id = build_node(idx.subspan(mid), depth + 1, Xc, y_enc, pool_res);
+            const auto left_id = build_node(idx.subspan(0, mid), depth + 1, Xc, y_enc, pool_res, rng_);
+            const auto right_id = build_node(idx.subspan(mid), depth + 1, Xc, y_enc, pool_res, rng_);
             tree_.make_split(node_id, best.feature, best.threshold, left_id, right_id);
             return node_id;
         }
@@ -359,7 +361,6 @@ namespace AxML {
         std::shared_ptr<LabelEncoderInternal> encoder_;
         std::vector<i32> sample_indices_;   // shared permutation buffer, partitioned in place
         std::vector<i32> all_features_;     // reused across every split, zero per-node allocation
-        std::mt19937 rng_;
 
         i32 n_samples_ = 0, d_ = 0, n_classes_ = 0, k_features_ = 0;
         i32 max_depth_, min_samples_split_, min_samples_leaf_, max_features_;
@@ -372,19 +373,16 @@ namespace AxML {
     using vec = std::vector<T>;
 
     public:
-        explicit DecisionTreeRegressor(
-            const i32 max_depth = -1, const i32 min_samples_split = 2,
-            const i32 min_samples_leaf = 1, const MaxFeatures max_features = MaxFeatures::Sqrt,
-            const uint64_t random_state = 42) :
-        max_depth_(max_depth),
-        min_samples_split_(min_samples_split),
-        min_samples_leaf_(min_samples_leaf),
-        max_features_(static_cast<i32>(max_features)),
-        random_state_(random_state)
+        explicit DecisionTreeRegressor(const DecisionTreeParams& params) :
+        max_depth_(params.max_depth),
+        min_samples_split_(params.min_samples_split),
+        min_samples_leaf_(params.min_samples_leaf),
+        max_features_(params.get_mf()),
+        random_state_(params.random_state)
         {}
 
         void fit(const MatrixR& X, const Vector& y) override {
-            std::array<std::byte, 8192> local_buffer;
+            std::array<std::byte, 8192> local_buffer{};
             std::pmr::monotonic_buffer_resource mbr(local_buffer.data(), local_buffer.size(), std::pmr::new_delete_resource());
             std::pmr::unsynchronized_pool_resource async_res(&mbr);
 
@@ -398,12 +396,12 @@ namespace AxML {
             tcp.sampleCount = y.size();
 
             const auto est_nodes = detail::estimate_tree_capacity(tcp);
-
+            std::mt19937_64 rng(random_state_);
             const MatrixC Xc = X;
-            fit_shared(Xc, y, std::move(indices), est_nodes, &async_res);
+            fit_shared(Xc, y, std::move(indices), est_nodes, &async_res, rng);
         }
 
-        Vector predict(const MatrixR& X) const override {
+        [[nodiscard]] Vector predict(const MatrixR& X) const override {
             if (X.cols() != d_) {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", d_, X.cols()));
             }
@@ -417,9 +415,15 @@ namespace AxML {
             return output;
         }
 
-        void save(OutputArchive &ar) const override;
-        void load(InputArchive &ar) override;
-        std::unique_ptr<Estimator> clone() const override;
+        void save(OutputArchive &ar) const override {
+
+        }
+        void load(InputArchive &ar) override {
+
+        }
+        [[nodiscard]] std::unique_ptr<Estimator> clone() const override {
+            return std::make_unique<DecisionTreeRegressor>(*this);
+        }
 
         void reset() override {
             tree_.reset();
@@ -428,12 +432,12 @@ namespace AxML {
             fitted_ = false;
         }
 
-        std::string name() const override { return "DecisionTreeRegressor"; }
-        uint32_t type_id() const override { return ID_DT_REGRESSION; }
+        [[nodiscard]] std::string name() const override { return "DecisionTreeRegressor"; }
+        [[nodiscard]] uint32_t type_id() const override { return ID_DT_REGRESSION; }
 
-        i32 n_nodes() const { return tree_.get_num_nodes(); }
-        uint64_t dims() const override {return d_;}
-        bool is_fitted() const override {return fitted_;}
+        [[nodiscard]] i32 n_nodes() const { return tree_.get_num_nodes(); }
+        [[nodiscard]] uint64_t dims() const override {return d_;}
+        [[nodiscard]] bool is_fitted() const override {return fitted_;}
 
     private:
         friend RandomForestRegressor;
@@ -442,7 +446,9 @@ namespace AxML {
             // Do nothing
         }
 
-        void fit_shared(const MatrixC& Xc, const Vector& y, std::vector<i32> initial_indices, const size_t est_nodes, std::pmr::memory_resource* pool_res) {
+        void fit_shared(
+            const MatrixC& Xc, const Vector& y, std::vector<i32> initial_indices,
+         const size_t est_nodes, std::pmr::memory_resource* pool_res, std::mt19937_64& rng_) {
             if (Xc.rows() != y.size()) {
                 throw std::invalid_argument("Size mismatch. X.rows() must be equal to y.size()");
             }
@@ -458,13 +464,13 @@ namespace AxML {
             rng_.seed(random_state_);
             tree_.initialize(est_nodes, 1); // regression has only one output
 
-            build_node(std::span<i32>(sample_indices_), 0, Xc, y, pool_res);
+            build_node(std::span<i32>(sample_indices_), 0, Xc, y, pool_res, rng_);
 
             tree_.freeze();
             fitted_ = true;
         }
 
-        i32 predict_node(const MatrixR& X, const i32 row) const {
+        [[nodiscard]] i32 predict_node(const MatrixR& X, const i32 row) const {
             i32 node = 0;
             while (tree_.get_left_child_index(node) != -1) {
                 node = (X(row, tree_.get_feature_index(node)) <= tree_.get_node_threshold(node))
@@ -480,7 +486,7 @@ namespace AxML {
             }
         }
 
-        i32 build_node(const std::span<i32> idx, const i32 depth, const MatrixC& Xc, const Vector& y_enc, std::pmr::memory_resource* async_pool) {
+        i32 build_node(const std::span<i32> idx, const i32 depth, const MatrixC& Xc, const Vector& y_enc, std::pmr::memory_resource* async_pool, std::mt19937_64& rng_) {
             const i32 node_id = tree_.new_node();
             const i32 n_node = static_cast<i32>(idx.size());
             Scalar mean = 0.0;
@@ -512,14 +518,14 @@ namespace AxML {
             }
 
             const i32 mid = detail::partition_span(idx, Xc, best.feature, best.threshold);
-            const auto left_id = build_node(idx.subspan(0, mid), depth + 1, Xc, y_enc, async_pool);
-            const auto right_id = build_node(idx.subspan(mid), depth + 1, Xc, y_enc, async_pool);
+            const auto left_id = build_node(idx.subspan(0, mid), depth + 1, Xc, y_enc, async_pool, rng_);
+            const auto right_id = build_node(idx.subspan(mid), depth + 1, Xc, y_enc, async_pool, rng_);
             tree_.make_split(node_id, best.feature, best.threshold, left_id, right_id);
             return node_id;
         }
 
 
-        static detail::SplitResult best_split_regression(const MatrixC &Xc, const i32 feature, const Vector &y_enc,
+        [[nodiscard]] static detail::SplitResult best_split_regression(const MatrixC &Xc, const i32 feature, const Vector &y_enc,
                                                          const std::span<const i32> idx, const i32 min_samples_leaf,
                                                          std::pmr::memory_resource* pool_res)
         {
@@ -536,14 +542,14 @@ namespace AxML {
                 std::execution::unseq,
                 ys_sorted.begin(), ys_sorted.end(),
                 Scalar{0.0},
-                std::plus<Scalar>(),
+                std::plus(),
                 [](const Scalar x) {return x;}
             );
             const Scalar total_sq = std::transform_reduce(
                 std::execution::unseq,
                 ys_sorted.begin(), ys_sorted.end(),
                 Scalar{0.0},
-                std::plus<Scalar>(),
+                std::plus(),
                 [](const Scalar x) {return x * x;}
             );
 
@@ -578,7 +584,6 @@ namespace AxML {
         detail::GTree tree_; // regression has only one output
         std::vector<i32> sample_indices_;   // shared permutation buffer, partitioned in place
         std::vector<i32> all_features_;     // reused across every split, zero per-node allocation
-        std::mt19937 rng_;
 
         i32 n_samples_ = 0, d_ = 0, k_features_ = 0;
         i32 max_depth_, min_samples_split_, min_samples_leaf_, max_features_;
