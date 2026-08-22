@@ -10,23 +10,29 @@ namespace AxML {
 
     class LinearDiscriminantAnalysis final : public Classifier {
     public:
-        explicit LinearDiscriminantAnalysis() {}
+        explicit LinearDiscriminantAnalysis() = default;
 
-        void save(OutputArchive &ar) const override;
+        void save(OutputArchive &ar) const override {}
 
-        void load(InputArchive &ar) override;
+        void load(InputArchive &ar) override {}
 
-        std::unique_ptr<Estimator> clone() const override;
+        [[nodiscard]] std::unique_ptr<Estimator> clone() const override { return std::make_unique<LinearDiscriminantAnalysis>(*this); }
 
-        bool is_fitted() const override { return is_fitted_; }
+        [[nodiscard]] bool is_fitted() const override { return is_fitted_; }
 
-        uint64_t dims() const override { return num_features_; }
-        void reset() override;
+        [[nodiscard]] uint64_t dims() const override { return num_features_; }
+        void reset() override {
+            means_.setZero();
+            log_priors_.setZero();
+            precision_tensor_.setZero();
+            log_det_cov_ = 0;
+            is_fitted_ = false;
+        }
 
-        std::string name() const override { return "LinearDiscriminantAnalysis"; }
-        uint32_t type_id() const override { return ID_LDA_CLASSIFIER; }
+        [[nodiscard]] std::string name() const override { return "LinearDiscriminantAnalysis"; }
+        [[nodiscard]] uint32_t type_id() const override { return ID_LDA_CLASSIFIER; }
 
-        VectorI predict(const MatrixR &X) const override {
+        [[nodiscard]] VectorI predict(const MatrixR &X) const override {
             if (X.cols() != num_features_) {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", num_features_, X.cols()));
             }
@@ -43,9 +49,9 @@ namespace AxML {
             return preds;
         }
 
-        bool supports_predict_proba() const noexcept override { return true; }
+        [[nodiscard]] bool supports_predict_proba() const noexcept override { return true; }
 
-        MatrixR predict_proba(const MatrixR &X) const override {
+        [[nodiscard]] MatrixR predict_proba(const MatrixR &X) const override {
             if (X.cols() != num_features_) {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", num_features_, X.cols()));
             }
@@ -58,7 +64,7 @@ namespace AxML {
         }
 
     protected:
-        const LabelEncoderInternal &get_encoder_() const override {
+        [[nodiscard]] const LabelEncoderInternal &get_encoder_() const override {
             return encoder_;
         }
 
@@ -72,28 +78,30 @@ namespace AxML {
 
             const i32 N = static_cast<i32>(X.rows());
             means_.resize(num_classes_, num_features_);
-            priors_.resize(num_classes_);
+            log_priors_.resize(num_classes_);
 
-            MatrixC shared_cov(num_features_, num_features_);
+            MatrixC shared_cov = MatrixR::Zero(num_features_, num_features_);
 
             std::vector<i32> indices(N);
             i32 N_c = 0;
             for (i32 c = 0; c < num_classes_; ++c) {
 
                 for (i32 i = 0; i < N; ++i) {
-                    indices.at(N_c) = i;
-                    N_c += y_enc[i] == c ? 1 : 0;
+                    if (y_enc[i] == c) {
+                        indices.at(N_c) = i;
+                        ++N_c;
+                    }
                 }
 
                 MatrixR Xc(N_c, num_features_);
                 for (int i = 0; i < N_c; ++i) {
                     Xc.row(i) = X.row(indices[i]);
                 }
-                priors_(c) = std::log(static_cast<Scalar>(N_c) / N);
+                log_priors_(c) = std::log(static_cast<Scalar>(N_c) / N);
                 const Vector mean = Xc.colwise().mean();
                 means_.row(c) = mean;
 
-                MatrixR centered = Xc.rowwise().mean() - mean.transpose();
+                MatrixR centered = Xc.rowwise() - mean.transpose();
                 shared_cov += centered.transpose() * centered;
                 N_c = 0;
             }
@@ -103,30 +111,43 @@ namespace AxML {
 
             // Cholesky
             const Eigen::LLT<MatrixC> llt(shared_cov);
+            if (llt.info() != Eigen::Success) {
+                throw std::runtime_error("LDA SOLVE: Cholesky decomposition failed. The covariance matrix might not be positive definite.");
+            }
             MatrixC L = llt.matrixL();
 
             // Precision matrix (Inverse covariance)
             precision_tensor_ = llt.solve(MatrixC::Identity(num_features_, num_features_));
 
             // log(det(cov)) = 2 * sum(log(diag(L)))
-            log_det_cov_ = 2.0f * L.diagonal().array().log().sum();
+            log_det_cov_ = 2.0 * L.diagonal().array().log().sum();
 
             is_fitted_ = true;
         }
 
     private:
 
-        MatrixR predict_log_proba(const MatrixR &X) const {
-            const Scalar dim = static_cast<Scalar>(num_features_);
+        [[nodiscard]] MatrixR predict_log_proba(const MatrixR &X) const {
+            const auto dim = static_cast<Scalar>(num_features_);
             constexpr Scalar log_2pi = 1.8378770664093454835606594728112; // ln(2 * pi)
             const Scalar constant_term = -0.5f * (log_det_cov_ + dim * log_2pi);
 
+            MatrixR log_proba(X.rows(), num_classes_);
+            MatrixR diff(X.rows(), num_features_);
+
+            for (i32 i = 0; i < num_classes_; ++i) {
+                diff.noalias() = X.rowwise() - means_.row(i);
+                auto mahalanobis = (diff * precision_tensor_).cwiseProduct(diff).rowwise().sum();
+                log_proba.col(i).array() = (-0.5 * mahalanobis).array() + log_priors_(i) + constant_term;
+            }
+            return log_proba;
+            /*
             // Term A: x^T * Sigma^-1 * x -> (batch, 1)
-            MatrixC X_P = X * precision_tensor_;
+            MatrixC X_P = X.transpose() * precision_tensor_;
             const Vector term_x = (X_P.array() * X.array()).rowwise().sum();
 
             // Term B: mu^T * Sigma^-1 * mu -> (C)
-            MatrixC Means_P = means_ * precision_tensor_;
+            MatrixC Means_P = means_.transpose() * precision_tensor_;
             Vector term_mu = (Means_P.array() * means_.array()).rowwise().sum();
 
             // Term C: -2 * x^T * Sigma^-1 * mu -> (batch, C)
@@ -139,7 +160,7 @@ namespace AxML {
             }
             mahalanobis_sq += term_interaction;
 
-            MatrixR log_likelihood = Vector::Constant(num_classes_, constant_term) - static_cast<Scalar>(0.5) * mahalanobis_sq;
+            MatrixR log_likelihood = constant_term - static_cast<Scalar>(0.5) * mahalanobis_sq.array();
 
             // Add priors
             for (int c = 0; c < num_classes_; ++c) {
@@ -147,6 +168,7 @@ namespace AxML {
             }
 
             return log_likelihood;
+            */
         }
 
         static void softmax_inplace(MatrixR& logits) {
@@ -159,7 +181,7 @@ namespace AxML {
 
         LabelEncoderInternal encoder_;
         MatrixC means_;               // (C, F)
-        Vector priors_;               // (C)
+        Vector log_priors_;               // (C)
         MatrixC precision_tensor_;    // (F, F)
         Scalar log_det_cov_{};        // (1)
         i32 num_classes_{};
@@ -172,23 +194,28 @@ namespace AxML {
         explicit QuadraticDiscriminantAnalysis(const bool is_naive_bayes = false) : is_naive_bayes_(is_naive_bayes) {}
 
         bool supports_predict_proba() const noexcept override { return true; }
-        void save(OutputArchive &ar) const override;
+        void save(OutputArchive &ar) const override{}
 
-        void load(InputArchive &ar) override;
+        void load(InputArchive &ar) override{}
 
-        std::unique_ptr<Estimator> clone() const override;
+        std::unique_ptr<Estimator> clone() const override{return std::make_unique<QuadraticDiscriminantAnalysis>(*this);}
 
-        void reset() override;
+        void reset() override {
+            means.setZero();
+            priors.setZero();
+            nb_variances.setZero();
+            is_fitted_ = false;
+        }
 
-        std::string name() const override { return "QuadraticDiscriminantAnalysis"; }
+        [[nodiscard]] std::string name() const override { return "QuadraticDiscriminantAnalysis"; }
 
-        uint32_t type_id() const override { return ID_QDA_CLASSIFIER; }
+        [[nodiscard]] uint32_t type_id() const override { return ID_QDA_CLASSIFIER; }
 
-        bool is_fitted() const override { return is_fitted_; }
+        [[nodiscard]] bool is_fitted() const override { return is_fitted_; }
 
-        uint64_t dims() const override { return num_features_; }
+        [[nodiscard]] uint64_t dims() const override { return num_features_; }
 
-        VectorI predict(const MatrixR &X) const override {
+        [[nodiscard]] VectorI predict(const MatrixR &X) const override {
             if (X.cols() != num_features_) {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", num_features_, X.cols()));
             }
@@ -205,7 +232,7 @@ namespace AxML {
             return preds;
         }
 
-        MatrixR predict_proba(const MatrixR &X) const override {
+        [[nodiscard]] MatrixR predict_proba(const MatrixR &X) const override {
             if (X.cols() != num_features_) {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", num_features_, X.cols()));
             }
@@ -218,7 +245,7 @@ namespace AxML {
         }
 
     protected:
-        const LabelEncoderInternal &get_encoder_() const override {
+        [[nodiscard]] const LabelEncoderInternal &get_encoder_() const override {
             return encoder_;
         }
 
