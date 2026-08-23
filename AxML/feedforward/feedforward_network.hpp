@@ -31,11 +31,13 @@ namespace AxML::ff {
             biases = Vector::Zero(out_size);
         }
 
-        MatrixR forward(const MatrixR& input) {
+        template<typename Derived>
+        MatrixR forward(const Eigen::MatrixBase<Derived>& input) {
+            AXML_MATR_ASSERT(Derived)
             input_cache = input;
             z_cache = (input * weights).rowwise() + biases.transpose();
 
-            detail::ActivationResult act_result = std::visit(
+            const detail::ActivationResult act_result = std::visit(
                 [&](const auto& act) { return act.forward(z_cache); },
                 activation
             );
@@ -44,7 +46,9 @@ namespace AxML::ff {
             return a_cache;
         }
 
-        MatrixR backward(const MatrixR& grad_output) {
+        template<typename Derived>
+        MatrixR backward(const Eigen::MatrixBase<Derived>& grad_output) {
+            AXML_MATR_ASSERT(Derived)
             // Compute gradient w.r.t. pre-activation
             MatrixR grad_z = std::visit(
                 [&](const auto& act) { return act.backward(z_cache, grad_output); },
@@ -130,12 +134,15 @@ namespace AxML::ff {
 
         // Single training step
         // Returns: {data_loss, regularization_penalty, total_loss}
-        [[nodiscard]] std::tuple<Scalar, Scalar, Scalar> trainStep(const MatrixR& input, const MatrixR& targets) {
+        template <typename DerivedX, typename DerivedY>
+        [[nodiscard]] std::tuple<Scalar, Scalar, Scalar> trainStep(const Eigen::MatrixBase<DerivedX>& input, const Eigen::MatrixBase<DerivedY>& targets) {
+            AXML_MATR_ASSERT(DerivedX)
+            AXML_FVEC_ASSERT(DerivedY)
             // Forward pass
             MatrixR predictions = model_.forward(input);
 
             // Compute loss and its gradient
-            detail::LossResult loss_result = std::visit(
+            auto [value, gradient] = std::visit(
                 [&](const auto& loss) { return loss.forward(predictions, targets); },
                 loss_fn_
             );
@@ -144,12 +151,12 @@ namespace AxML::ff {
             Scalar reg_penalty = model_.getRegularizationPenalty();
 
             // Total loss = data loss + regularization penalty
-            Scalar total_loss = loss_result.value + reg_penalty;
+            Scalar total_loss = value + reg_penalty;
 
             // Backward pass (regularization gradients are added automatically in Layer::backward)
-            model_.backward(loss_result.gradient);
+            model_.backward(gradient);
 
-            return {loss_result.value, reg_penalty, total_loss};
+            return {value, reg_penalty, total_loss};
         }
 
         // Evaluation (no gradient computation needed in model)

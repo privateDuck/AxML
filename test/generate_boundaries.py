@@ -9,6 +9,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from sklearn.naive_bayes import GaussianNB
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
+from sklearn.neural_network import MLPClassifier
 
 warnings.filterwarnings("ignore")
 
@@ -58,8 +59,11 @@ def main():
         ]),
         "NaiveBayes": (GaussianNB, [{}]),
         "LDA": (LinearDiscriminantAnalysis, [{}]),
-        "QDA": (QuadraticDiscriminantAnalysis, [{}])
+        "QDA": (QuadraticDiscriminantAnalysis, [{}]),
+        "MCPC": (MLPClassifier, [{}])
     }
+
+    mcp = MLPClassifier()
 
     # Start building the C++ header
     cpp_code = "#pragma once\n#include <vector>\n#include <string>\n#include \"../AxML/common.hpp\"\n\n"

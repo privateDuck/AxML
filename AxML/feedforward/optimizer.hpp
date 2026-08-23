@@ -10,7 +10,7 @@ namespace AxML::ff {
         explicit SGDOptimizer(const Scalar learning_rate = 0.01f, const Scalar momentum = 0.0f)
             : lr_(learning_rate), momentum_(momentum) {}
 
-        void step(detail::FeedForwardNN& model) {
+        void step(FeedForwardNN& model) {
             if (velocity_.empty()) {
                 // Initialize velocity vectors
                 for (const auto& layer : model.getLayers()) {
@@ -33,7 +33,7 @@ namespace AxML::ff {
             }
         }
 
-        void zeroGrad(detail::FeedForwardNN& model) {
+        static void zeroGrad(FeedForwardNN& model) {
             model.zeroGrad();
         }
 
@@ -52,7 +52,7 @@ namespace AxML::ff {
                               const Scalar epsilon = 1e-8f)
             : lr_(learning_rate), beta1_(beta1), beta2_(beta2), epsilon_(epsilon), t_(0) {}
 
-        void step(detail::FeedForwardNN& model) {
+        void step(FeedForwardNN& model) {
             if (m_.empty()) {
                 // Initialize moments
                 for (const auto& layer : model.getLayers()) {
@@ -91,7 +91,7 @@ namespace AxML::ff {
             }
         }
 
-        void zeroGrad(detail::FeedForwardNN& model) {
+        static void zeroGrad(FeedForwardNN& model) {
             model.zeroGrad();
         }
 
@@ -104,6 +104,8 @@ namespace AxML::ff {
         std::vector<std::pair<MatrixC, Vector>> m_;  // First moment
         std::vector<std::pair<MatrixC, Vector>> v_;  // Second moment
     };
+
+    using OptimizerType = std::variant<SGDOptimizer, AdamOptimizer>;
 }
 
 #endif //AXML_OPTIMIZER_HPP

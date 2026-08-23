@@ -168,6 +168,23 @@ struct RBFSVCParams {
   Scalar tolerance = 1e-6;
 };
 
+struct MLPParams {
+  std::vector<i32> hidden_layers = {100};
+  std::string activation = "relu"; // relu, tanh, sigmoid, softmax (non-trainable), linear
+  std::string solver = "sgd"; // adam, sgd
+  std::string regularization = "none";
+  u64 random_state = 42;
+  Scalar learning_rate = 1e-3; // init value
+  Scalar beta_1 = 0.9; // adam
+  Scalar beta_2 = 0.99; // adam
+  Scalar epsilon = 1e-6; // adam
+  Scalar momentum = 0.0; // sgd
+  Scalar tolerance = 1e-6;
+  i32 batch_size = 64;
+  i32 max_iter = 10000;
+  std::function<void(Scalar, Scalar, i32)> callback_fn; // Called per batch. (data_loss, regularization_loss, iteration)
+};
+
 } // namespace AxML
 
 #endif // AXML_PARAM_CONFIG_HPP
