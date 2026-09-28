@@ -24,7 +24,7 @@ namespace AxML {
 
         uint32_t type_id() const override;
 
-        void fit(const MatrixR &X) override {
+        void fit(const ConstMatRRef &X) override {
             if (X.rows() == 0) {
                 throw std::invalid_argument("Input matrix X must have at least one row.");
             }

@@ -29,7 +29,7 @@ namespace AxML {
         std::string name() const override { return "KMeans"; }
         uint32_t type_id() const override { return ID_KMEANS; }
 
-        void fit(const MatrixR &X) override {
+        void fit(const ConstMatRRef &X) override {
             const auto D = X.cols();
             const auto N = X.rows();
 
@@ -178,7 +178,7 @@ namespace AxML {
             labels_.clear();
             labels_.shrink_to_fit();
         }
-        MatrixR transform(const MatrixR &X) const override {
+        MatrixR transform(const ConstMatRRef &X) const override {
             if (!is_fitted_) {
                 throw std::logic_error("Transform is not fitted.");
             }
@@ -198,7 +198,7 @@ namespace AxML {
             }
             return preds;
         }
-        MatrixR fit_transform(const MatrixR &X) override {
+        MatrixR fit_transform(const ConstMatRRef &X) override {
             fit(X);
             MatrixR preds(X.rows(), 1);
             for (i32 i = 0; i < X.rows(); ++i) {

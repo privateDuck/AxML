@@ -14,7 +14,7 @@ namespace AxML {
                 const RegularizationType regularization = RegularizationType::NONE,
                 const int64_t max_iter = 10000, const Scalar tolerance = 1e-6, const Scalar l1_reg = 0.01, const Scalar l2_reg = 0.01
             )
-            : tol_(tolerance), max_iter_(max_iter), fitted_(false) {
+            : tol_(tolerance), max_iter_(max_iter) {
             switch (regularization) {
                 case RegularizationType::L1:
                     reg_fn_ = detail::L1Regularization{l1_reg};
@@ -32,7 +32,7 @@ namespace AxML {
             }
         }
 
-        [[nodiscard]] Vector predict(const MatrixR &X) const override {
+        [[nodiscard]] Vector predict(const ConstMatRRef &X) const override {
             if (!fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -71,7 +71,7 @@ namespace AxML {
         [[nodiscard]] int64_t getIterations() const { return iterations_; }
 
     protected:
-        void fit_impl(const MatrixR &X, const Vector &y) override {
+        void fit_impl(const ConstMatRRef &X, const ConstVecRef &y) override {
             if (!fitted_) {
                 n_features_ = X.cols();
                 n_outputs_ = y.cols();
@@ -121,7 +121,7 @@ namespace AxML {
         int64_t n_outputs_{};
         int64_t iterations_{};
         int64_t max_iter_;
-        bool fitted_;
+        bool fitted_ = false;
     };
 
     // MSE Loss + L2 Regularization
@@ -133,7 +133,7 @@ namespace AxML {
             : reg_fn_(detail::L2Regularization{alpha}), tol_(tolerance), max_iter_(max_iter), fitted_(false) {
         }
 
-        [[nodiscard]] Vector predict(const MatrixR &X) const override {
+        [[nodiscard]] Vector predict(const ConstMatRRef &X) const override {
             if (!fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -154,7 +154,6 @@ namespace AxML {
             last_loss_ = 0.0;
             n_features_ = 0;
             n_outputs_ = 0;
-            iterations_ = 0;
             fitted_ = false;
         }
 
@@ -172,7 +171,7 @@ namespace AxML {
         [[nodiscard]] int64_t getIterations() const { return iterations_; }
 
     protected:
-        void fit_impl(const MatrixR &X, const Vector &y) override {
+        void fit_impl(const ConstMatRRef &X, const ConstVecRef &y) override {
             if (!fitted_) {
                 n_features_ = X.cols();
                 n_outputs_ = y.cols();
@@ -234,7 +233,7 @@ namespace AxML {
             : reg_fn_(detail::L1Regularization{alpha}), tol_(tolerance), max_iter_(max_iter), fitted_(false) {
         }
 
-        [[nodiscard]] Vector predict(const MatrixR &X) const override {
+        [[nodiscard]] Vector predict(const ConstMatRRef &X) const override {
             if (!fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -273,7 +272,7 @@ namespace AxML {
         [[nodiscard]] int64_t getIterations() const { return iterations_; }
 
     protected:
-        void fit_impl(const MatrixR &X, const Vector &y) override {
+        void fit_impl(const ConstMatRRef &X, const ConstVecRef &y) override {
             if (!fitted_) {
                 n_features_ = X.cols();
                 n_outputs_ = y.cols();
@@ -337,7 +336,7 @@ namespace AxML {
         tol_(tolerance), max_iter_(max_iter), fitted_(false) {
         }
 
-        [[nodiscard]] Vector predict(const MatrixR &X) const override {
+        [[nodiscard]] Vector predict(const ConstMatRRef &X) const override {
             if (!fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -376,7 +375,7 @@ namespace AxML {
         [[nodiscard]] int64_t getIterations() const { return iterations_; }
 
     protected:
-        void fit_impl(const MatrixR &X, const Vector &y) override {
+        void fit_impl(const ConstMatRRef &X, const ConstVecRef &y) override {
             if (!fitted_) {
                 n_features_ = X.cols();
                 n_outputs_ = y.cols();

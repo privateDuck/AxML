@@ -31,9 +31,9 @@ namespace AxML::ff {
             biases = Vector::Zero(out_size);
         }
 
-        template<typename Derived>
-        MatrixR forward(const Eigen::MatrixBase<Derived>& input) {
-            AXML_MATR_ASSERT(Derived)
+        template<typename DerivedX>
+        MatrixR forward(const Eigen::MatrixBase<DerivedX>& input) {
+            AXML_MATR_ASSERT(DerivedX)
             input_cache = input;
             z_cache = (input * weights).rowwise() + biases.transpose();
 
@@ -60,7 +60,7 @@ namespace AxML::ff {
             bias_grad = grad_z.colwise().sum();
 
             // Add regularization gradient to weight gradients
-            detail::RegularizationResult reg_result = std::visit(
+            const detail::RegularizationResult reg_result = std::visit(
                 [&](const auto& reg) { return reg.compute(weights); },
                 regularization
             );
@@ -88,7 +88,9 @@ namespace AxML::ff {
             layers.emplace_back(in_size, out_size, std::move(activation), std::move(regularization));
         }
 
-        [[nodiscard]] MatrixR forward(const MatrixR& input) {
+        template<typename DerivedX>
+        [[nodiscard]] MatrixR forward(const Eigen::MatrixBase<DerivedX>& input) {
+            AXML_MATR_ASSERT(DerivedX)
             MatrixR curr = input;
             for (auto& layer : layers) {
                 curr = layer.forward(curr);
@@ -96,7 +98,9 @@ namespace AxML::ff {
             return curr;
         }
 
-        void backward(const MatrixR& grad_output) {
+        template<typename Derived>
+        void backward(const Eigen::MatrixBase<Derived>& grad_output) {
+            AXML_MATR_ASSERT(Derived)
             MatrixR grad = grad_output;
             for (int i = static_cast<int>(layers.size()) - 1; i >= 0; --i) {
                 grad = layers[i].backward(grad);
@@ -134,16 +138,23 @@ namespace AxML::ff {
 
         // Single training step
         // Returns: {data_loss, regularization_penalty, total_loss}
-        template <typename DerivedX, typename DerivedY>
-        [[nodiscard]] std::tuple<Scalar, Scalar, Scalar> trainStep(const Eigen::MatrixBase<DerivedX>& input, const Eigen::MatrixBase<DerivedY>& targets) {
-            AXML_MATR_ASSERT(DerivedX)
-            AXML_FVEC_ASSERT(DerivedY)
+        //template <typename T1, typename T2>
+        [[nodiscard]] std::tuple<Scalar, Scalar, Scalar> trainStep(const ConstMatRRef& input, const ConstVecRef& targets) {
             // Forward pass
             MatrixR predictions = model_.forward(input);
+            Vector preds;
+            if (predictions.cols() != 1) {
+                preds.resize(predictions.rows());
+                for (int i = 0; i < predictions.rows(); ++i) {
+                    Eigen::Index max_index = 0;
+                    predictions.row(i).maxCoeff(&max_index);
+                    preds(i) = static_cast<Scalar>(max_index);
+                }
+            }
 
             // Compute loss and its gradient
             auto [value, gradient] = std::visit(
-                [&](const auto& loss) { return loss.forward(predictions, targets); },
+                [&](const auto& loss) { return loss.forward(preds, targets); },
                 loss_fn_
             );
 
@@ -161,7 +172,10 @@ namespace AxML::ff {
 
         // Evaluation (no gradient computation needed in model)
         // Returns: {data_loss, regularization_penalty, total_loss}
-        [[nodiscard]] std::tuple<Scalar, Scalar, Scalar> evaluate(const MatrixR& input, const MatrixR& targets) {
+        template<typename DerivedX, typename DerivedY>
+        [[nodiscard]] std::tuple<Scalar, Scalar, Scalar> evaluate(const Eigen::MatrixBase<DerivedX>& input, const Eigen::MatrixBase<DerivedY>& targets) {
+            AXML_MATR_ASSERT(DerivedX)
+            AXML_FVEC_ASSERT(DerivedY)
             MatrixR predictions = model_.forward(input);
 
             auto [value, gradient] = std::visit(

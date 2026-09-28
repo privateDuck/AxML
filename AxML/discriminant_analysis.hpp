@@ -31,7 +31,7 @@ namespace AxML {
         [[nodiscard]] std::string name() const override { return "LinearDiscriminantAnalysis"; }
         [[nodiscard]] uint32_t type_id() const override { return ID_LDA_CLASSIFIER; }
 
-        [[nodiscard]] VectorI predict(const MatrixR &X) const override {
+        [[nodiscard]] VectorI predict(const ConstMatRRef &X) const override {
             if (X.cols() != num_features_) {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", num_features_, X.cols()));
             }
@@ -50,7 +50,7 @@ namespace AxML {
 
         [[nodiscard]] bool supports_predict_proba() const noexcept override { return true; }
 
-        [[nodiscard]] MatrixR predict_proba(const MatrixR &X) const override {
+        [[nodiscard]] MatrixR predict_proba(const ConstMatRRef &X) const override {
             if (X.cols() != num_features_) {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", num_features_, X.cols()));
             }
@@ -62,7 +62,7 @@ namespace AxML {
             return logits;
         }
 
-        [[nodiscard]] MatrixR predict_log_proba(const MatrixR &X) const {
+        [[nodiscard]] MatrixR predict_log_proba(const ConstMatRRef &X) const {
             MatrixR log_proba = (X * W_).rowwise() + b_.transpose();
 
             if (compute_exact_log_proba_) {
@@ -78,7 +78,7 @@ namespace AxML {
             return encoder_;
         }
 
-        void fit_impl(const MatrixR &X, const VectorI &y) override {
+        void fit_impl(const ConstMatRRef &X, const ConstVecIRef &y) override {
             const std::span<const i32> y_span(y.data(), y.size());
             encoder_.fit(y_span);
             const auto y_enc = encoder_.transform(y_span);
@@ -165,11 +165,6 @@ namespace AxML {
 
         LabelEncoderInternal encoder_;
         MatrixC precision_tensor_;    // (F, F)
-        /*
-        MatrixC means_;               // (C, F)
-        Vector log_priors_;               // (C)
-        Scalar log_det_cov_{};        // (1)
-        */
         MatrixC W_;
         Vector b_;
         i32 num_classes_{};
@@ -204,7 +199,7 @@ namespace AxML {
 
         [[nodiscard]] uint64_t dims() const override { return num_features_; }
 
-        [[nodiscard]] VectorI predict(const MatrixR &X) const override {
+        [[nodiscard]] VectorI predict(const ConstMatRRef &X) const override {
             if (X.cols() != num_features_) {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", num_features_, X.cols()));
             }
@@ -221,7 +216,7 @@ namespace AxML {
             return preds;
         }
 
-        [[nodiscard]] MatrixR predict_proba(const MatrixR &X) const override {
+        [[nodiscard]] MatrixR predict_proba(const ConstMatRRef &X) const override {
             if (X.cols() != num_features_) {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", num_features_, X.cols()));
             }
@@ -238,7 +233,7 @@ namespace AxML {
             return encoder_;
         }
 
-        void fit_impl(const MatrixR &X, const VectorI &y) override {
+        void fit_impl(const ConstMatRRef &X, const ConstVecIRef &y) override {
             const std::span y_span(y.data(), y.size());
             encoder_.fit(y_span);
             const auto y_enc = encoder_.transform(y_span);

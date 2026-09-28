@@ -14,24 +14,28 @@ namespace AxML::detail {
     };
 
     struct ReLU {
-        [[nodiscard]] ActivationResult forward(const MatrixR& z) const {
+        template<typename Derived>
+        [[nodiscard]] ActivationResult forward(const Eigen::MatrixBase<Derived>& z) const {
             return {z.cwiseMax(0), z};
         }
 
-        [[nodiscard]] MatrixR backward(const MatrixR& z_cache, const MatrixR& grad_output) const {
+        template<typename DerivedZ, typename DerivedGrad>
+        [[nodiscard]] MatrixR backward(const Eigen::MatrixBase<DerivedZ>& z_cache, const Eigen::MatrixBase<DerivedGrad>& grad_output) const {
             return grad_output.cwiseProduct((z_cache.array() > 0).cast<Scalar>().matrix());
         }
     };
 
     struct Sigmoid {
-        ActivationResult forward(const MatrixR& z) const {
+        template<typename Derived>
+        [[nodiscard]] ActivationResult forward(const Eigen::MatrixBase<Derived>& z) const {
             MatrixR output = z.unaryExpr([](Scalar x) {
                 return 1.0f / (1.0f + std::exp(-x));
             });
             return {output, z};
         }
 
-        MatrixR backward(const MatrixR& z_cache, const MatrixR& grad_output) const {
+        template<typename DerivedZ, typename DerivedGrad>
+        [[nodiscard]] MatrixR backward(const Eigen::MatrixBase<DerivedZ>& z_cache, const Eigen::MatrixBase<DerivedGrad>& grad_output) const {
             // sigmoid'(z) = sigmoid(z) * (1 - sigmoid(z))
             MatrixR a = z_cache.unaryExpr([](const Scalar x) {
                 return 1.0f / (1.0f + std::exp(-x));
@@ -41,12 +45,14 @@ namespace AxML::detail {
     };
 
     struct Tanh {
-        [[nodiscard]] ActivationResult forward(const MatrixR& z) const {
+        template<typename Derived>
+        [[nodiscard]] ActivationResult forward(const Eigen::MatrixBase<Derived>& z) const {
             MatrixR output = z.unaryExpr([](const Scalar x) { return std::tanh(x); });
             return {output, z};
         }
 
-        [[nodiscard]] MatrixR backward(const MatrixR& z_cache, const MatrixR& grad_output) const {
+        template<typename DerivedZ, typename DerivedGrad>
+        [[nodiscard]] MatrixR backward(const Eigen::MatrixBase<DerivedZ>& z_cache, const Eigen::MatrixBase<DerivedGrad>& grad_output) const {
             // tanh'(z) = 1 - tanh²(z)
             MatrixR a = z_cache.unaryExpr([](const Scalar x) { return std::tanh(x); });
             return grad_output.cwiseProduct((1 - a.array().square()).matrix());
@@ -54,7 +60,8 @@ namespace AxML::detail {
     };
 
     struct Softmax {
-        [[nodiscard]] ActivationResult forward(const MatrixR& z) const {
+        template<typename Derived>
+        [[nodiscard]] ActivationResult forward(const Eigen::MatrixBase<Derived>& z) const {
             MatrixR output = z;
             for (int i = 0; i < output.rows(); ++i) {
                 Scalar maxVal = output.row(i).maxCoeff();
@@ -67,7 +74,8 @@ namespace AxML::detail {
         // Note: Softmax gradient is complex (Jacobian matrix per sample)
         // Usually combined with CrossEntropy for numerical stability
         // This is a simplified version
-        [[nodiscard]] MatrixR backward(const MatrixR& z_cache, const MatrixR& grad_output) const {
+        template<typename DerivedZ, typename DerivedGrad>
+        [[nodiscard]] MatrixR backward(const Eigen::MatrixBase<DerivedZ>& z_cache, const Eigen::MatrixBase<DerivedGrad>& grad_output) const {
             MatrixR a = forward(z_cache).output;
             MatrixR grad = MatrixR::Zero(grad_output.rows(), grad_output.cols());
 
@@ -83,11 +91,13 @@ namespace AxML::detail {
     };
 
     struct Linear {
-        ActivationResult forward(const MatrixR& z) const {
+        template<typename Derived>
+        ActivationResult forward(const Eigen::MatrixBase<Derived>& z) const {
             return {z, z};
         }
 
-        MatrixR backward(const MatrixR& z_cache, const MatrixR& grad_output) const {
+        template<typename DerivedZ, typename DerivedGrad>
+        [[nodiscard]] MatrixR backward(const Eigen::MatrixBase<DerivedZ>& z_cache, const Eigen::MatrixBase<DerivedGrad>& grad_output) const {
             return grad_output;
         }
     };
@@ -100,11 +110,13 @@ namespace AxML::detail {
     };
 
     struct NoRegularization {
-        RegularizationResult compute(const MatrixC& weights) const {
+        template<typename Derived>
+        RegularizationResult compute(const Eigen::MatrixBase<Derived>& weights) const {
             return {0.0, MatrixC::Zero(weights.rows(), weights.cols())};
         }
 
-        Scalar compute_wo_grad(const MatrixC& weights) const {
+        template<typename Derived>
+        Scalar compute_wo_grad(const Eigen::MatrixBase<Derived>& weights) const {
             return 0.0;
         }
     };
@@ -114,7 +126,8 @@ namespace AxML::detail {
 
         explicit L2Regularization(const Scalar l = 0.01) : lambda(l) {}
 
-        RegularizationResult compute(const MatrixC& weights) const {
+        template<typename Derived>
+        RegularizationResult compute(const Eigen::MatrixBase<Derived>& weights) const {
             // L2 penalty: λ/2 * ||W||²
             const Scalar penalty = 0.5 * lambda * weights.array().square().sum();
 
@@ -124,7 +137,8 @@ namespace AxML::detail {
             return {penalty, gradient};
         }
 
-        Scalar compute_wo_grad(const MatrixC& weights) const {
+        template<typename Derived>
+        Scalar compute_wo_grad(const Eigen::MatrixBase<Derived>& weights) const {
             return 0.5 * lambda * weights.array().square().sum();
         }
     };
@@ -134,7 +148,8 @@ namespace AxML::detail {
 
         explicit L1Regularization(const Scalar l = 0.01) : lambda(l) {}
 
-        RegularizationResult compute(const MatrixC& weights) const {
+        template<typename Derived>
+        RegularizationResult compute(const Eigen::MatrixBase<Derived>& weights) const {
             // L1 penalty: λ * ||W||
             const Scalar penalty = lambda * weights.array().abs().sum();
 
@@ -144,7 +159,8 @@ namespace AxML::detail {
             return {penalty, gradient};
         }
 
-        Scalar compute_wo_grad(const MatrixC& weights) const {
+        template<typename Derived>
+        Scalar compute_wo_grad(const Eigen::MatrixBase<Derived>& weights) const {
             return lambda * weights.array().abs().sum();
         }
     };
@@ -156,7 +172,8 @@ namespace AxML::detail {
         explicit ElasticNetRegularization(const Scalar l1 = 0.01, const Scalar l2 = 0.01)
             : l1_lambda(l1), l2_lambda(l2) {}
 
-        RegularizationResult compute(const MatrixC& weights) const {
+        template<typename Derived>
+        RegularizationResult compute(const Eigen::MatrixBase<Derived>& weights) const {
             // Elastic Net: a * L1 + (1 - a) * L2
             // We use explicit l1_lambda and l2_lambda for more control
             const Scalar l1_penalty = l1_lambda * weights.array().abs().sum();
@@ -168,7 +185,8 @@ namespace AxML::detail {
             return {l1_penalty + l2_penalty, l1_grad + l2_grad};
         }
 
-        Scalar compute_wo_grad(const MatrixC& weights) const {
+        template<typename Derived>
+        Scalar compute_wo_grad(const Eigen::MatrixBase<Derived>& weights) const {
             const Scalar l1_penalty = l1_lambda * weights.array().abs().sum();
             const Scalar l2_penalty = 0.5 * l2_lambda * weights.array().square().sum();
             return l1_penalty + l2_penalty;
@@ -179,20 +197,20 @@ namespace AxML::detail {
 
     struct LossResult {
         Scalar value;
-        MatrixR gradient;  // Gradient w.r.t predictions
+        Vector gradient;  // Gradient w.r.t predictions
     };
 
     struct MSELoss {
-        LossResult forward(const MatrixR& predictions, const MatrixR& targets) const {
-            const MatrixR diff = predictions - targets;
+        LossResult forward(const ConstVecRef& predictions, const ConstVecRef& targets) const {
+            const auto diff = predictions - targets;
             const Scalar n = static_cast<Scalar>(predictions.rows());
             const Scalar loss = diff.array().square().sum() / n;
-            const MatrixR grad = (2.0 / n) * diff;
+            const Vector grad = (2.0 / n) * diff;
             return {loss, grad};
         }
 
-        Scalar forward_wo_grad(const MatrixR& predictions, const MatrixR& targets) const {
-            const MatrixR diff = predictions - targets;
+        Scalar forward_wo_grad(const ConstVecRef& predictions, const ConstVecRef& targets) const {
+            const auto diff = predictions - targets;
             const Scalar n = static_cast<Scalar>(predictions.rows());
             const Scalar loss = diff.array().square().sum() / n;
             return loss;
@@ -200,16 +218,16 @@ namespace AxML::detail {
     };
 
     struct MAELoss {
-        LossResult forward(const MatrixR& predictions, const MatrixR& targets) const {
-            const MatrixR diff = predictions - targets;
+        LossResult forward(const ConstVecRef& predictions, const ConstVecRef& targets) const {
+            const auto diff = predictions - targets;
             const Scalar n = static_cast<Scalar>(predictions.rows());
             const Scalar loss = diff.array().abs().sum() / n;
-            const MatrixR grad = diff.array().sign().matrix() / n;
+            const Vector grad = diff.array().sign().matrix() / n;
             return {loss, grad};
         }
 
-        Scalar forward_wo_grad(const MatrixR& predictions, const MatrixR& targets) const {
-            const MatrixR diff = predictions - targets;
+        Scalar forward_wo_grad(const ConstVecRef& predictions, const ConstVecRef& targets) const {
+            const auto diff = predictions - targets;
             const Scalar n = static_cast<Scalar>(predictions.rows());
             return diff.array().abs().sum() / n;
         }
@@ -218,25 +236,25 @@ namespace AxML::detail {
     struct CrossEntropyLoss {
         // Works with Softmax output (probabilities)
         // Targets must be one-hot encoded
-        LossResult forward(const MatrixR& predictions, const MatrixR& targets) const {
+        LossResult forward(const ConstVecRef& predictions, const ConstVecRef& targets) const {
             const Scalar n = static_cast<Scalar>(predictions.rows());
 
             // Clip predictions for numerical stability
-            const MatrixR safe_pred = predictions.cwiseMax(1e-7f).cwiseMin(1.0f - 1e-7f);
+            const auto safe_pred = predictions.cwiseMax(1e-7f).cwiseMin(1.0f - 1e-7f);
 
             // Loss: -sum(y_true * log(y_pred)) / n
             const Scalar loss = -(targets.array() * safe_pred.array().log()).sum() / n;
 
             // Gradient: (y_pred - y_true) / n
             // This is the combined gradient of Softmax + CrossEntropy
-            const MatrixR grad = (predictions - targets) / n;
+            const Vector grad = (predictions - targets) / n;
 
             return {loss, grad};
         }
 
-        Scalar forward_wo_grad(const MatrixR& predictions, const MatrixR& targets) const {
+        Scalar forward_wo_grad(const ConstVecRef& predictions, const ConstVecRef& targets) const {
             const Scalar n = static_cast<Scalar>(predictions.rows());
-            const MatrixR safe_pred = predictions.cwiseMax(1e-7f).cwiseMin(1.0f - 1e-7f);
+            const auto safe_pred = predictions.cwiseMax(1e-7f).cwiseMin(1.0f - 1e-7f);
             const Scalar loss = -(targets.array() * safe_pred.array().log()).sum() / n;
             return loss;
         }
@@ -247,12 +265,12 @@ namespace AxML::detail {
 
         explicit HuberLoss(const Scalar d = 1.0f) : delta(d) {}
 
-        LossResult forward(const MatrixR& predictions, const MatrixR& targets) const {
-            MatrixR diff = predictions - targets;
+        LossResult forward(const ConstVecRef& predictions, const ConstVecRef& targets) const {
+            const auto diff = (predictions - targets).eval();
             const Scalar n = static_cast<Scalar>(predictions.rows());
 
             Scalar loss = 0;
-            MatrixR grad = MatrixR::Zero(diff.rows(), diff.cols());
+            Vector grad = Vector::Zero(diff.rows());
 
             for (int i = 0; i < diff.size(); ++i) {
                 const Scalar abs_err = std::abs(diff(i));
@@ -268,8 +286,8 @@ namespace AxML::detail {
             return {loss / n, grad / n};
         }
 
-        Scalar forward_wo_grad(const MatrixR& predictions, const MatrixR& targets) const {
-            MatrixR diff = predictions - targets;
+        Scalar forward_wo_grad(const ConstVecRef& predictions, const ConstVecRef& targets) const {
+            const auto diff = (predictions - targets).eval();
             const Scalar n = static_cast<Scalar>(predictions.rows());
             Scalar loss = 0;
             for (int i = 0; i < diff.size(); ++i) {
@@ -289,14 +307,13 @@ namespace AxML::detail {
 
         explicit MultiHingeLoss(Scalar m = 1.0f) : margin(m) {}
 
-        LossResult forward(const MatrixR& predictions, const MatrixR& targets) const {
+        std::tuple<Scalar, MatrixR> forward(const ConstMatRRef& predictions, const ConstVecRef& targets) const {
             const Scalar n = static_cast<Scalar>(predictions.rows());
             Scalar total_loss = 0;
             MatrixR grad = MatrixR::Zero(predictions.rows(), predictions.cols());
 
             for (int i = 0; i < n; ++i) {
-                int correct_class;
-                targets.row(i).maxCoeff(&correct_class);
+                int correct_class = static_cast<int>(targets(i));
                 const Scalar correct_score = predictions(i, correct_class);
                 int violation_count = 0;
 
@@ -317,12 +334,11 @@ namespace AxML::detail {
             return {total_loss / n, grad / n};
         }
 
-        Scalar forward_wo_grad(const MatrixR& predictions, const MatrixR& targets) const {
+        Scalar forward_wo_grad(const ConstMatRRef& predictions, const ConstVecRef& targets) const {
             const Scalar n = static_cast<Scalar>(predictions.rows());
             Scalar total_loss = 0;
             for (int i = 0; i < n; ++i) {
-                int correct_class;
-                targets.row(i).maxCoeff(&correct_class);
+                int correct_class = static_cast<int>(targets(i));
                 const Scalar correct_score = predictions(i, correct_class);
                 int violation_count = 0;
 
@@ -343,7 +359,7 @@ namespace AxML::detail {
 
     struct ZeroOneLoss {
         // Non-differentiable, for evaluation only
-        LossResult forward(const MatrixR& predictions, const MatrixR& targets) const {
+        LossResult forward(const ConstVecRef& predictions, const ConstVecRef& targets) const {
             const Scalar n = static_cast<Scalar>(predictions.rows());
             Scalar errors = 0;
 
@@ -355,10 +371,10 @@ namespace AxML::detail {
             }
 
             // Zero gradient (not trainable)
-            return {errors / n, MatrixR::Zero(predictions.rows(), predictions.cols())};
+            return {errors / n, Vector::Zero(predictions.rows())};
         }
 
-        Scalar forward_wo_grad(const MatrixR& predictions, const MatrixR& targets) const {
+        Scalar forward_wo_grad(const ConstVecRef& predictions, const ConstVecRef& targets) const {
             const Scalar n = static_cast<Scalar>(predictions.rows());
             Scalar errors = 0;
 
@@ -372,7 +388,7 @@ namespace AxML::detail {
         }
     };
 
-    using LossFunc = std::variant<MSELoss, MAELoss, CrossEntropyLoss, HuberLoss, MultiHingeLoss, ZeroOneLoss>;
+    using LossFunc = std::variant<MSELoss, MAELoss, CrossEntropyLoss, HuberLoss, ZeroOneLoss>; // Multi Hinge Loss not part of this anymore.
 }
 
 #endif //AXML_FEEDFORWARD_BASE_HPP

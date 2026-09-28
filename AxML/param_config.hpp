@@ -102,7 +102,7 @@ struct RandomForestParams {
   bool enable_bootstrap = true;
   /** @brief The size of the bootstrap sample. -1 means sample size is equal to the number of input samples */
   i32 bootstrap_size = -1;
-  /** @brief The number of threads to run in parallel. -1 means use all available processors */
+  /** @brief The number of threads to run in parallel. 0 means main thread. -1 means use all available processors */
   i32 n_threads = -1; // -1: all, 1: strict single threaded, n: n threads
   /** @brief Seed used by the random number generator */
   u64 random_state = 42;
@@ -167,6 +167,15 @@ struct RBFSVCParams {
   /** @brief Tolerance for stopping criteria */
   Scalar tolerance = 1e-6;
 };
+
+
+  struct LinearRegressorParams {
+    std::string regularization = "none";
+    i32 max_iter = 10000;
+    Scalar tolerance = 1e-6;
+    Scalar l1_reg = 0.01;
+    Scalar l2_reg = 0.01;
+  };
 
 struct MLPParams {
   std::vector<i32> hidden_layers = {100};

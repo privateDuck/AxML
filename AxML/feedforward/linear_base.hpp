@@ -19,8 +19,11 @@ namespace AxML::detail {
 
     class LinearModelProblem {
     public:
-        LinearModelProblem(const MatrixR& X, const MatrixR& y, LossFunc loss, RegularizationFunc reg)
+        template<typename DerivedX, typename DerivedY>
+        LinearModelProblem(const Eigen::MatrixBase<DerivedX>& X, const Eigen::MatrixBase<DerivedY>& y, LossFunc loss, RegularizationFunc reg)
             : X_(X), y_(y), loss_fn_(std::move(loss)), reg_fn_(std::move(reg)) {
+            AXML_MATR_ASSERT(DerivedX)
+            AXML_FVEC_ASSERT(DerivedY)
             n_samples_ = X.rows();
             n_features_ = X.cols();
             n_outputs_ = y.cols();
@@ -29,10 +32,10 @@ namespace AxML::detail {
         // Compute loss
         Scalar operator()(const Vector& params, Vector& grad) {
             // unpack parameters into weights and biases
-            MatrixR W = Eigen::Map<const MatrixR>(
+            auto W = Eigen::Map<const MatrixR>(
                 params.data(), n_features_, n_outputs_
             );
-            Vector b = Eigen::Map<const Vector>(
+            auto b = Eigen::Map<const Vector>(
                 params.data() + n_features_ * n_outputs_, n_outputs_
             );
 
@@ -40,7 +43,7 @@ namespace AxML::detail {
             MatrixR predictions = (X_ * W).rowwise() + b.transpose();
 
             // compute data loss and gradient
-                auto [loss_value, loss_gradient] = std::visit(
+            auto [loss_value, loss_gradient] = std::visit(
                 [&](const auto& loss) { return loss.forward(predictions, y_); },
                 loss_fn_
             );
@@ -55,10 +58,10 @@ namespace AxML::detail {
 
             // compute gradients
             // dL/dW = X^T * loss_gradient + reg_gradient
-            MatrixR grad_W = X_.transpose() * loss_gradient + weight_gradient;
+            const MatrixR grad_W = X_.transpose() * loss_gradient + weight_gradient;
 
             // dL/db = sum(loss_gradient) across samples
-            Vector grad_b = loss_gradient.colwise().sum();
+            const Vector grad_b = loss_gradient.colwise().sum();
 
             // Pack gradients into single vector
             Eigen::Map<MatrixR>(grad.data(), n_features_, n_outputs_) = grad_W;
@@ -87,7 +90,10 @@ namespace AxML::detail {
         LinearModelLBFGS(LossFunc loss, RegularizationFunc reg, const Scalar tolerance = 1e-6)
             : reg_fn_(std::move(reg)), loss_fn_(std::move(loss)), tol_(tolerance), fitted_(false) {}
 
-        void fit(const MatrixR& X, const MatrixR& y, const int max_iterations = 100) {
+        template<typename DerivedX, typename DerivedY>
+        void fit(const Eigen::MatrixBase<DerivedX>& X, const Eigen::MatrixBase<DerivedY>& y, const int max_iterations = 100) {
+            AXML_MATR_ASSERT(DerivedX)
+            AXML_FVEC_ASSERT(DerivedY)
             n_features_ = X.cols();
             n_outputs_ = y.cols();
 
@@ -124,14 +130,19 @@ namespace AxML::detail {
             iterations_ = niter;
         }
 
-        [[nodiscard]] MatrixR predict(const MatrixR& X) const {
+        template<typename Derived>
+        [[nodiscard]] MatrixR predict(const Eigen::MatrixBase<Derived>& X) const {
+            AXML_MATR_ASSERT(Derived)
             if (!fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
             return (X * weights_).rowwise() + biases_.transpose();
         }
 
-        [[nodiscard]] Scalar evaluate(const MatrixR& X, const MatrixR& y) const {
+        template<typename DerivedX, typename DerivedY>
+        [[nodiscard]] Scalar evaluate(const Eigen::MatrixBase<DerivedX>& X, const Eigen::MatrixBase<DerivedY>& y) const {
+            AXML_MATR_ASSERT(DerivedX)
+            AXML_FVEC_ASSERT(DerivedY)
             MatrixR predictions = predict(X);
             const auto value = std::visit(
                 [&](const auto& loss) { return loss.forward_wo_grad(predictions, y); },

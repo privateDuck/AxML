@@ -8,6 +8,72 @@
 #include "../rff.hpp"
 
 namespace AxML {
+
+    namespace detail {
+
+        class MultiHingeProblem {
+        public:
+        MultiHingeProblem(const MatrixR& X, const Vector& y, RegularizationFunc reg)
+            : X_(X), y_(y), loss_fn_(MultiHingeLoss{}), reg_fn_(std::move(reg)) {
+            n_samples_ = X.rows();
+            n_features_ = X.cols();
+            n_outputs_ = y.cols();
+        }
+
+        // Compute loss
+        Scalar operator()(const Vector& params, Vector& grad) {
+            // unpack parameters into weights and biases
+            auto W = Eigen::Map<const MatrixR>(
+                params.data(), n_features_, n_outputs_
+            );
+            auto b = Eigen::Map<const Vector>(
+                params.data() + n_features_ * n_outputs_, n_outputs_
+            );
+
+            // predictions = X * W + b
+            MatrixR predictions = (X_ * W).rowwise() + b.transpose();
+
+            // compute data loss and gradient
+            auto [loss_value, loss_gradient] = loss_fn_.forward(predictions, y_);
+
+            // compute regularization
+            auto [penalty, weight_gradient] = std::visit(
+                [&](const auto& reg) { return reg.compute(W); },
+                reg_fn_
+            );
+
+            const Scalar total_loss = loss_value + penalty;
+
+            // compute gradients
+            // dL/dW = X^T * loss_gradient + reg_gradient
+            const MatrixR grad_W = X_.transpose() * loss_gradient + weight_gradient;
+
+            // dL/db = sum(loss_gradient) across samples
+            const Vector grad_b = loss_gradient.colwise().sum();
+
+            // Pack gradients into single vector
+            Eigen::Map<MatrixR>(grad.data(), n_features_, n_outputs_) = grad_W;
+            Eigen::Map<Vector>(grad.data() + n_features_ * n_outputs_, n_outputs_) = grad_b;
+
+            return total_loss;
+        }
+
+        [[nodiscard]] int64_t num_params() const {
+            return n_features_ * n_outputs_ + n_outputs_;
+        }
+
+    private:
+        const MatrixR &X_;
+        const Vector &y_;
+        MultiHingeLoss loss_fn_;
+        RegularizationFunc reg_fn_;
+        int64_t n_samples_;
+        int64_t n_features_;
+        int64_t n_outputs_;
+    };
+
+    }
+
     class RBFSVC;
 
     class LinearSVC : public Classifier {
@@ -17,7 +83,7 @@ namespace AxML {
         C_(C), max_iter_(max_iter), fitted_(false) {
         }
 
-        VectorI predict(const MatrixR &X) const override {
+        VectorI predict(const ConstMatRRef &X) const override {
             if (X.cols() != n_features_) {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", n_features_, X.cols()));
             }
@@ -66,7 +132,7 @@ namespace AxML {
             return encoder_;
         }
 
-        void fit_impl(const MatrixR &X, const VectorI &y) override {
+        void fit_impl(const ConstMatRRef &X, const ConstVecIRef &y) override {
             // SVM convention: minimize (1/C)||w||² + Σ hinge_loss
             // Equivalent to: minimize hinge_loss + (1/2C)λ||w||²
             // So we need to adjust regularization strength based on C
@@ -78,7 +144,7 @@ namespace AxML {
                 const auto y_span = std::span(y.data(), y.size());
                 encoder_.fit(y_span);
                 const auto y_enc_scalar = encoder_.transform_to_float(y_span);
-                const Vector y_enc_vector = Eigen::Map<const Vector>(y_enc_scalar.data(), y_enc_scalar.size());
+                const auto y_enc_vector = Eigen::Map<const Vector>(y_enc_scalar.data(), y_enc_scalar.size());
 
                 // Initialize parameters (Xavier initialization)
                 const Scalar limit = std::sqrt(6.0f / static_cast<Scalar>(n_features_ + n_outputs_));
@@ -92,8 +158,8 @@ namespace AxML {
 
                 // Create optimization problem
                 // TODO: There is an inefficiency here. y_enc_vector is copied since the expected type is MatrixR
-                // FIX: Use DenseBase<Derived> template pattern and a move semantic??
-                detail::LinearModelProblem problem(X, y_enc_vector, loss_fn_, reg_fn_);
+                // Fixed
+                detail::MultiHingeProblem problem(X, y_enc_vector, reg_fn_);
 
                 // Setup LBFGS
                 LBFGSpp::LBFGSParam<Scalar> param;
@@ -118,7 +184,7 @@ namespace AxML {
 
     private:
 
-        MatrixR lin_solve(const MatrixR& X) const {
+        MatrixR lin_solve(const ConstMatRRef& X) const {
             if (!fitted_) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -129,7 +195,6 @@ namespace AxML {
         MatrixR weights_;
         detail::RegularizationFunc reg_fn_;
         Vector biases_;
-        detail::LossFunc loss_fn_ = detail::MultiHingeLoss{1.0f};
         Scalar tol_;
         Scalar C_;
         Scalar last_loss_{};
@@ -147,7 +212,7 @@ namespace AxML {
             const int64_t max_iter = 10000, const Scalar tolerance = 1e-6) :
         linear_svc_(C, max_iter, tolerance), gamma_(gamma), C_(C), rf_features_(rf_features) {}
 
-        VectorI predict(const MatrixR &X) const override {
+        VectorI predict(const ConstMatRRef &X) const override {
             if (!linear_svc_.is_fitted()) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -155,7 +220,7 @@ namespace AxML {
             return linear_svc_.predict(Z);
         }
 
-        [[nodiscard]] MatrixR decision_function(const MatrixR& X) const {
+        [[nodiscard]] MatrixR decision_function(const ConstMatRRef& X) const {
             if (!linear_svc_.is_fitted()) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -184,7 +249,7 @@ namespace AxML {
         const LabelEncoderInternal &get_encoder_() const override {
             return linear_svc_.encoder_;
         }
-        void fit_impl(const MatrixR &X, const VectorI &y) override {
+        void fit_impl(const ConstMatRRef &X, const ConstVecIRef &y) override {
             if (!linear_svc_.is_fitted()) {
                 rff_.generate(X.cols(), rf_features_, gamma_);
                 MatrixR Z = rff_.transform(X);

@@ -30,7 +30,7 @@ namespace AxML {
 
         struct ITree {
 
-            void fit(const MatrixC& Xc, const std::span<i32> idx, std::mt19937_64& rgen, const i32 max_depth) {
+            void fit(const ConstMatCRef& Xc, const std::span<i32> idx, std::mt19937_64& rgen, const i32 max_depth) {
                 const i32 est = estimate_max_node_count(idx.size(), max_depth, 1, 1);
                 max_depth_ = max_depth;
                 tree_.initialize(est, 1);
@@ -113,7 +113,7 @@ namespace AxML {
                 get_raw_scores_(get_raw_scores)
         {}
 
-        MatrixR transform(const MatrixR &X) const override {
+        MatrixR transform(const ConstMatRRef &X) const override {
             if ( !is_fitted_ ) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -146,12 +146,12 @@ namespace AxML {
             return final_scores;
         }
 
-        MatrixR fit_transform(const MatrixR &X) override {
+        MatrixR fit_transform(const ConstMatRRef &X) override {
             fit(X);
             return transform(X);
         }
 
-        void fit(const MatrixR &X) override {
+        void fit(const ConstMatRRef &X) override {
             const i32 m = X.cols();
             r_dims_ = m < 20 ? m : std::min(m, 32);
             sample_size_ = std::min(sample_size_, static_cast<i32>(X.rows()));
@@ -234,7 +234,7 @@ namespace AxML {
             : random_state_(random_state), sample_size_(sample_size),
               n_estimators_(n_estimators), max_depth_(0), get_raw_scores_(get_raw_scores) {}
 
-        void fit(const MatrixR &X) override {
+        void fit(const ConstMatRRef &X) override {
             sample_size_ = std::min(sample_size_, static_cast<i32>(X.rows()));
             max_depth_ = static_cast<i32>(std::ceil(std::log2(static_cast<double>(sample_size_))));
             trees_.resize(n_estimators_);
@@ -257,7 +257,7 @@ namespace AxML {
 
             is_fitted_ = true;
         }
-        MatrixR transform(const MatrixR &X) const override {
+        MatrixR transform(const ConstMatRRef &X) const override {
             if ( !is_fitted_ ) {
                 throw std::runtime_error("Model not fitted yet!");
             }
@@ -289,7 +289,7 @@ namespace AxML {
             }
             return final_scores;
         }
-        MatrixR fit_transform(const MatrixR &X) override;
+        MatrixR fit_transform(const ConstMatRRef &X) override;
 
         void save(OutputArchive &ar) const override;
         void load(InputArchive &ar) override;

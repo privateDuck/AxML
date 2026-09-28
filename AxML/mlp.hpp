@@ -27,7 +27,7 @@ namespace AxML {
 
         uint32_t type_id() const override;
 
-        VectorI predict(const MatrixR &X) const override;
+        VectorI predict(const ConstMatRRef &X) const override;
 
     protected:
         detail::RegularizationFunc get_reg_fn() const {
@@ -62,7 +62,7 @@ namespace AxML {
             throw std::runtime_error("Activation function '" + params_.activation + "' is not supported for MLP");
         }
 
-        void fit_impl(const MatrixR &X, const VectorI &y) override {
+        void fit_impl(const ConstMatRRef &X, const ConstVecIRef &y) override {
             encoder_.fit(y);
             const auto y_enc = encoder_.transform_to_float(y);
             const auto act = get_act_fn();
@@ -97,8 +97,8 @@ namespace AxML {
             for (i32 iter = 0; iter < params_.max_iter; ++iter) {
                 for (i32 start = 0; start < X.rows(); start += params_.batch_size) {
                     const i32 end = std::min(start + params_.batch_size, static_cast<i32>(X.rows()));
-                    auto X_batch = X.middleRows(start, end - start);
-                    auto y_batch = Eigen::Map<const Vector>(y_enc.data() + start, end - start);
+                    const auto X_batch = X.middleRows(start, end - start);
+                    const auto y_batch = MapConstVector(y_enc.data() + start, end - start);
 
                     // zero grad
                     std::visit([&](auto&& optimizer) {
