@@ -33,19 +33,19 @@ namespace AxML {
 
     class Classifier : public Estimator {
     public:
-        virtual void fit(const MatrixR& X, const VectorI& y) {
+        virtual void fit(const ConstMatRRef& X, const ConstVecIRef& y) {
             if(X.rows() != y.size()) {
                 throw std::logic_error("Number of rows in X must match size of y");
             }
             fit_impl(X, y);
         }
 
-        virtual VectorI predict(const MatrixR& X) const = 0;
-        virtual bool supports_predict_proba() const noexcept { return false; }
-        virtual MatrixR predict_proba(const MatrixR& X) const {
+        [[nodiscard]] virtual VectorI predict(const ConstMatRRef& X) const = 0;
+        [[nodiscard]] virtual bool supports_predict_proba() const noexcept { return false; }
+        [[nodiscard]] virtual MatrixR predict_proba(const ConstMatRRef &X) const {
             throw std::logic_error("predict_proba not supported by this classifier");
         }
-        ClassificationReport score(const MatrixR& X, const VectorI& y_true) const {
+        [[nodiscard]] ClassificationReport score(const ConstMatRRef &X, const MapConstVectorI &y_true) const {
             if (X.rows() != y_true.size()) {
                 throw std::runtime_error("Number of rows in X must match size of y_true");
             }
@@ -60,32 +60,32 @@ namespace AxML {
             return report;
         }
     protected:
-        virtual void fit_impl(const MatrixR& X, const VectorI& y) = 0;
-        virtual const LabelEncoderInternal& get_encoder_() const = 0;
+        virtual void fit_impl(const ConstMatRRef& X, const ConstVecIRef& y) = 0;
+        [[nodiscard]] virtual const LabelEncoderInternal& get_encoder_() const = 0;
     };
 
     class Regressor : public Estimator {
     public:
-        virtual void fit(const MatrixR& X, const Vector& y) {
+        virtual void fit(const ConstMatRRef& X, const ConstVecRef& y) {
             if(X.rows() != y.size()) {
                 throw std::logic_error("Number of rows in X must match size of y");
             }
             fit_impl(X, y);
         }
 
-        virtual Vector predict(const MatrixR& X) const = 0;
+        [[nodiscard]] virtual Vector predict(const ConstMatRRef& X) const = 0;
 
     protected:
-        virtual void fit_impl(const MatrixR& X, const Vector& y) = 0;
+        virtual void fit_impl(const ConstMatRRef& X, const ConstVecRef& y) = 0;
     };
 
 
     class Transformer : public Estimator {
     public:
-        virtual void fit(const MatrixR& X) = 0;
-        virtual MatrixR transform(const MatrixR& X) const = 0;
-        virtual MatrixR fit_transform(const MatrixR& X) = 0;
-        virtual MatrixR inverse_transform(const MatrixR& X) const {
+        virtual void fit(const ConstMatRRef& X) = 0;
+        virtual MatrixR transform(const ConstMatRRef& X) const = 0;
+        virtual MatrixR fit_transform(const ConstMatRRef& X) = 0;
+        virtual MatrixR inverse_transform(const ConstMatRRef& X) const {
             throw std::logic_error("inverse_transform not supported by this transformer");
         }
     };

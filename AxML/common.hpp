@@ -4,7 +4,7 @@
 #include <Eigen/Dense>
 #include "model_index.hpp"
 #define AXML_MATR_ASSERT(Derived) static_assert(std::is_same_v<typename Derived::Scalar, Scalar>); static_assert(Derived::IsRowMajor,"row-major storage preferred");
-#define AXML_MATC_ASSERT(Derived) static_assert(std::is_same_v<typename Derived::Scalar, Scalar>); static_assert(Derived::IsColumnMajor,"column-major storage preferred");
+#define AXML_MATC_ASSERT(Derived) static_assert(std::is_same_v<typename Derived::Scalar, Scalar>); static_assert(!Derived::IsRowMajor,"column-major storage preferred");
 #define AXML_IVEC_ASSERT(Derived) static_assert(std::is_same_v<typename Derived::Scalar, i32>); static_assert(Derived::ColsAtCompileTime == 1);
 #define AXML_FVEC_ASSERT(Derived) static_assert(std::is_same_v<typename Derived::Scalar, Scalar>); static_assert(Derived::ColsAtCompileTime == 1);
 
