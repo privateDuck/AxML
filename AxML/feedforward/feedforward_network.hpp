@@ -16,9 +16,9 @@ namespace AxML::ff {
         Vector bias_grad;
 
         // Caches for backpropagation
-        MatrixR z_cache;       // Pre-activation
-        MatrixR a_cache;       // Post-activation
-        MatrixR input_cache;   // Input to this layer
+        MatrixC z_cache;       // Pre-activation
+        MatrixC a_cache;       // Post-activation
+        MatrixC input_cache;   // Input to this layer
 
         detail::ActivationFunc activation;
         detail::RegularizationFunc regularization;
@@ -32,8 +32,21 @@ namespace AxML::ff {
         }
 
         template<typename DerivedX>
-        MatrixR forward(const Eigen::MatrixBase<DerivedX>& input) {
-            AXML_MATR_ASSERT(DerivedX)
+        [[nodiscard]] MatrixC forward(const Eigen::MatrixBase<DerivedX>& input) const {
+            AXML_MATC_ASSERT(DerivedX)
+            const auto z = (input * weights).rowwise() + biases.transpose();
+
+            const detail::ActivationResult act_result = std::visit(
+                [&](const auto& act) { return act.forward(z); },
+                activation
+            );
+
+            return act_result.output;
+        }
+
+        template<typename DerivedX>
+        [[nodiscard]] MatrixC forward(const Eigen::MatrixBase<DerivedX>& input) {
+            AXML_MATC_ASSERT(DerivedX)
             input_cache = input;
             z_cache = (input * weights).rowwise() + biases.transpose();
 
@@ -47,17 +60,17 @@ namespace AxML::ff {
         }
 
         template<typename Derived>
-        MatrixR backward(const Eigen::MatrixBase<Derived>& grad_output) {
-            AXML_MATR_ASSERT(Derived)
+        MatrixC backward(const Eigen::MatrixBase<Derived>& grad_output) {
+            AXML_MATC_ASSERT(Derived)
             // Compute gradient w.r.t. pre-activation
-            MatrixR grad_z = std::visit(
+            MatrixC grad_z = std::visit(
                 [&](const auto& act) { return act.backward(z_cache, grad_output); },
                 activation
             );
 
             // Compute gradients for weights and biases
             weight_grad = input_cache.transpose() * grad_z;
-            bias_grad = grad_z.colwise().sum();
+            bias_grad = grad_z.colwise().sum().transpose();
 
             // Add regularization gradient to weight gradients
             const detail::RegularizationResult reg_result = std::visit(
@@ -85,13 +98,23 @@ namespace AxML::ff {
 
         void addLayer(int in_size, int out_size, detail::ActivationFunc activation,
                       detail::RegularizationFunc regularization = detail::NoRegularization{}) {
-            layers.emplace_back(in_size, out_size, std::move(activation), std::move(regularization));
+            layers.emplace_back(in_size, out_size, activation, regularization);
         }
 
         template<typename DerivedX>
-        [[nodiscard]] MatrixR forward(const Eigen::MatrixBase<DerivedX>& input) {
-            AXML_MATR_ASSERT(DerivedX)
-            MatrixR curr = input;
+        [[nodiscard]] MatrixC forward(const Eigen::MatrixBase<DerivedX>& input) const {
+            // AXML_MATR_ASSERT(DerivedX) Doesn't matter because we assign this to MatrixC anyways
+            MatrixC curr = input;
+            for (auto& layer : layers) {
+                curr = layer.forward(curr);
+            }
+            return curr;
+        }
+
+        template<typename DerivedX>
+        [[nodiscard]] MatrixC forward(const Eigen::MatrixBase<DerivedX>& input) {
+            // AXML_MATR_ASSERT(DerivedX) Doesn't matter because we assign this to MatrixC anyways
+            MatrixC curr = input;
             for (auto& layer : layers) {
                 curr = layer.forward(curr);
             }
@@ -100,8 +123,8 @@ namespace AxML::ff {
 
         template<typename Derived>
         void backward(const Eigen::MatrixBase<Derived>& grad_output) {
-            AXML_MATR_ASSERT(Derived)
-            MatrixR grad = grad_output;
+            AXML_MATC_ASSERT(Derived)
+            MatrixC grad = grad_output;
             for (int i = static_cast<int>(layers.size()) - 1; i >= 0; --i) {
                 grad = layers[i].backward(grad);
             }
@@ -133,28 +156,18 @@ namespace AxML::ff {
 
     class Trainer {
     public:
-        Trainer(FeedForwardNN& model, detail::LossFunc loss_fn)
-            : model_(model), loss_fn_(std::move(loss_fn)) {}
+        Trainer(FeedForwardNN& model, const detail::LossFunc loss_fn)
+            : model_(model), loss_fn_(loss_fn) {}
 
         // Single training step
         // Returns: {data_loss, regularization_penalty, total_loss}
-        //template <typename T1, typename T2>
-        [[nodiscard]] std::tuple<Scalar, Scalar, Scalar> trainStep(const ConstMatRRef& input, const ConstVecRef& targets) {
+        [[nodiscard]] std::tuple<Scalar, Scalar, Scalar> trainStep(const ConstMatRRef& input, const ConstMatCRef& targets) {
             // Forward pass
-            MatrixR predictions = model_.forward(input);
-            Vector preds;
-            if (predictions.cols() != 1) {
-                preds.resize(predictions.rows());
-                for (int i = 0; i < predictions.rows(); ++i) {
-                    Eigen::Index max_index = 0;
-                    predictions.row(i).maxCoeff(&max_index);
-                    preds(i) = static_cast<Scalar>(max_index);
-                }
-            }
+            MatrixC predictions = model_.forward(input);
 
             // Compute loss and its gradient
-            auto [value, gradient] = std::visit(
-                [&](const auto& loss) { return loss.forward(preds, targets); },
+            auto [loss, gradient] = std::visit(
+                [&](const auto& lossFn) { return lossFn.forward(predictions, targets); },
                 loss_fn_
             );
 
@@ -162,12 +175,12 @@ namespace AxML::ff {
             Scalar reg_penalty = model_.getRegularizationPenalty();
 
             // Total loss = data loss + regularization penalty
-            Scalar total_loss = value + reg_penalty;
+            Scalar total_loss = loss + reg_penalty;
 
             // Backward pass (regularization gradients are added automatically in Layer::backward)
             model_.backward(gradient);
 
-            return {value, reg_penalty, total_loss};
+            return {loss, reg_penalty, total_loss};
         }
 
         // Evaluation (no gradient computation needed in model)
@@ -175,8 +188,8 @@ namespace AxML::ff {
         template<typename DerivedX, typename DerivedY>
         [[nodiscard]] std::tuple<Scalar, Scalar, Scalar> evaluate(const Eigen::MatrixBase<DerivedX>& input, const Eigen::MatrixBase<DerivedY>& targets) {
             AXML_MATR_ASSERT(DerivedX)
-            AXML_FVEC_ASSERT(DerivedY)
-            MatrixR predictions = model_.forward(input);
+            AXML_MATR_ASSERT(DerivedY)
+            MatrixC predictions = model_.forward(input);
 
             auto [value, gradient] = std::visit(
                 [&](const auto& loss) { return loss.forward(predictions, targets); },
@@ -190,7 +203,7 @@ namespace AxML::ff {
         }
 
         // Get predictions without computing loss
-        [[nodiscard]] MatrixR predict(const MatrixR& input) const {
+        [[nodiscard]] MatrixC predict(const ConstMatRRef& input) const {
             return model_.forward(input);
         }
 

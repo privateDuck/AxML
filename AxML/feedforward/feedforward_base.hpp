@@ -21,7 +21,7 @@ namespace AxML::detail {
 
         template<typename DerivedZ, typename DerivedGrad>
         [[nodiscard]] MatrixR backward(const Eigen::MatrixBase<DerivedZ>& z_cache, const Eigen::MatrixBase<DerivedGrad>& grad_output) const {
-            return grad_output.cwiseProduct((z_cache.array() > 0).cast<Scalar>().matrix());
+            return grad_output.cwiseProduct((z_cache.array() > 0).template cast<Scalar>().matrix());
         }
     };
 
@@ -71,7 +71,7 @@ namespace AxML::detail {
             return {output, z};
         }
 
-        // Note: Softmax gradient is complex (Jacobian matrix per sample)
+        // Softmax gradient is complex (Jacobian matrix per sample)
         // Usually combined with CrossEntropy for numerical stability
         // This is a simplified version
         template<typename DerivedZ, typename DerivedGrad>
@@ -197,19 +197,19 @@ namespace AxML::detail {
 
     struct LossResult {
         Scalar value;
-        Vector gradient;  // Gradient w.r.t predictions
+        MatrixC gradient;  // Gradient w.r.t predictions
     };
 
     struct MSELoss {
-        LossResult forward(const ConstVecRef& predictions, const ConstVecRef& targets) const {
+        LossResult forward(const ConstMatCRef& predictions, const ConstMatCRef& targets) const {
             const auto diff = predictions - targets;
             const Scalar n = static_cast<Scalar>(predictions.rows());
             const Scalar loss = diff.array().square().sum() / n;
-            const Vector grad = (2.0 / n) * diff;
+            const MatrixC grad = (2.0 / n) * diff;
             return {loss, grad};
         }
 
-        Scalar forward_wo_grad(const ConstVecRef& predictions, const ConstVecRef& targets) const {
+        Scalar forward_wo_grad(const ConstMatCRef& predictions, const ConstMatCRef& targets) const {
             const auto diff = predictions - targets;
             const Scalar n = static_cast<Scalar>(predictions.rows());
             const Scalar loss = diff.array().square().sum() / n;
@@ -218,15 +218,15 @@ namespace AxML::detail {
     };
 
     struct MAELoss {
-        LossResult forward(const ConstVecRef& predictions, const ConstVecRef& targets) const {
+        LossResult forward(const ConstMatCRef& predictions, const ConstMatCRef& targets) const {
             const auto diff = predictions - targets;
             const Scalar n = static_cast<Scalar>(predictions.rows());
             const Scalar loss = diff.array().abs().sum() / n;
-            const Vector grad = diff.array().sign().matrix() / n;
+            const MatrixC grad = diff.array().sign().matrix() / n;
             return {loss, grad};
         }
 
-        Scalar forward_wo_grad(const ConstVecRef& predictions, const ConstVecRef& targets) const {
+        Scalar forward_wo_grad(const ConstMatCRef& predictions, const ConstMatCRef& targets) const {
             const auto diff = predictions - targets;
             const Scalar n = static_cast<Scalar>(predictions.rows());
             return diff.array().abs().sum() / n;
@@ -236,27 +236,57 @@ namespace AxML::detail {
     struct CrossEntropyLoss {
         // Works with Softmax output (probabilities)
         // Targets must be one-hot encoded
-        LossResult forward(const ConstVecRef& predictions, const ConstVecRef& targets) const {
+        LossResult forward(const MatrixR& predictions, const MatrixR& targets) const {
             const Scalar n = static_cast<Scalar>(predictions.rows());
-
             // Clip predictions for numerical stability
-            const auto safe_pred = predictions.cwiseMax(1e-7f).cwiseMin(1.0f - 1e-7f);
-
+            const MatrixR safe_pred = predictions.cwiseMax(1e-7f).cwiseMin(1.0f - 1e-7f);
             // Loss: -sum(y_true * log(y_pred)) / n
             const Scalar loss = -(targets.array() * safe_pred.array().log()).sum() / n;
-
             // Gradient: (y_pred - y_true) / n
             // This is the combined gradient of Softmax + CrossEntropy
-            const Vector grad = (predictions - targets) / n;
+            const MatrixR grad = (predictions - targets) / n;
 
             return {loss, grad};
         }
 
-        Scalar forward_wo_grad(const ConstVecRef& predictions, const ConstVecRef& targets) const {
+        Scalar forward_wo_grad(const MatrixR& predictions, const MatrixR& targets) const {
             const Scalar n = static_cast<Scalar>(predictions.rows());
-            const auto safe_pred = predictions.cwiseMax(1e-7f).cwiseMin(1.0f - 1e-7f);
+            const MatrixR safe_pred = predictions.cwiseMax(1e-7f).cwiseMin(1.0f - 1e-7f);
             const Scalar loss = -(targets.array() * safe_pred.array().log()).sum() / n;
             return loss;
+        }
+    };
+
+    struct CrossEntropyWithLogitsLoss {
+        // Works with linear output (logits)
+        // Targets must be one-hot encoded
+        static LossResult forward(const ConstMatCRef& logits, const ConstMatCRef& targets) {
+            const auto n = static_cast<Scalar>(logits.rows());
+
+            // Compute Softmax
+            MatrixC shifted_logits = logits.colwise() - logits.rowwise().maxCoeff();
+            MatrixC exp_preds = shifted_logits.array().exp();
+            const MatrixC probabilities = exp_preds.array().colwise() / exp_preds.rowwise().sum().array();
+
+            // Compute Loss
+            const auto safe_pred = probabilities.cwiseMax(1e-7f).cwiseMin(1.0f - 1e-7f);
+            const Scalar loss = -(targets.array() * safe_pred.array().log()).sum() / n;
+
+            // Combined Gradient w.r.t logits
+            const MatrixC grad = (probabilities - targets) / n;
+
+            return {loss, grad};
+        }
+
+        static Scalar forward_wo_grad(const ConstMatCRef& logits, const ConstMatCRef& targets) {
+            const auto n = static_cast<Scalar>(logits.rows());
+
+            MatrixC shifted_logits = logits.colwise() - logits.rowwise().maxCoeff();
+            MatrixC exp_preds = shifted_logits.array().exp();
+            MatrixC probabilities = exp_preds.array().colwise() / exp_preds.rowwise().sum().array();
+
+            const auto safe_pred = probabilities.cwiseMax(1e-7f).cwiseMin(1.0f - 1e-7f);
+            return -(targets.array() * safe_pred.array().log()).sum() / n;
         }
     };
 
@@ -265,12 +295,12 @@ namespace AxML::detail {
 
         explicit HuberLoss(const Scalar d = 1.0f) : delta(d) {}
 
-        LossResult forward(const ConstVecRef& predictions, const ConstVecRef& targets) const {
+        LossResult forward(const ConstMatCRef& predictions, const ConstMatCRef& targets) const {
             const auto diff = (predictions - targets).eval();
             const Scalar n = static_cast<Scalar>(predictions.rows());
 
             Scalar loss = 0;
-            Vector grad = Vector::Zero(diff.rows());
+            MatrixC grad = Vector::Zero(diff.rows());
 
             for (int i = 0; i < diff.size(); ++i) {
                 const Scalar abs_err = std::abs(diff(i));
@@ -286,7 +316,7 @@ namespace AxML::detail {
             return {loss / n, grad / n};
         }
 
-        Scalar forward_wo_grad(const ConstVecRef& predictions, const ConstVecRef& targets) const {
+        Scalar forward_wo_grad(const ConstMatCRef& predictions, const ConstMatCRef& targets) const {
             const auto diff = (predictions - targets).eval();
             const Scalar n = static_cast<Scalar>(predictions.rows());
             Scalar loss = 0;
@@ -305,15 +335,16 @@ namespace AxML::detail {
     struct MultiHingeLoss {
         Scalar margin = 1.0f;
 
-        explicit MultiHingeLoss(Scalar m = 1.0f) : margin(m) {}
+        explicit MultiHingeLoss(const Scalar m = 1.0f) : margin(m) {}
 
-        std::tuple<Scalar, MatrixR> forward(const ConstMatRRef& predictions, const ConstVecRef& targets) const {
+        LossResult forward(const ConstMatCRef& predictions, const ConstMatCRef& targets) const {
             const Scalar n = static_cast<Scalar>(predictions.rows());
             Scalar total_loss = 0;
-            MatrixR grad = MatrixR::Zero(predictions.rows(), predictions.cols());
+            MatrixC grad = MatrixC::Zero(predictions.rows(), predictions.cols());
 
             for (int i = 0; i < n; ++i) {
-                int correct_class = static_cast<int>(targets(i));
+                int correct_class;
+                targets.row(i).maxCoeff(&correct_class);
                 const Scalar correct_score = predictions(i, correct_class);
                 int violation_count = 0;
 
@@ -388,7 +419,7 @@ namespace AxML::detail {
         }
     };
 
-    using LossFunc = std::variant<MSELoss, MAELoss, CrossEntropyLoss, HuberLoss, ZeroOneLoss>; // Multi Hinge Loss not part of this anymore.
+    using LossFunc = std::variant<MSELoss, MAELoss, CrossEntropyLoss, CrossEntropyWithLogitsLoss, HuberLoss, MultiHingeLoss, ZeroOneLoss>; // Multi Hinge Loss not part of this anymore.
 }
 
 #endif //AXML_FEEDFORWARD_BASE_HPP
