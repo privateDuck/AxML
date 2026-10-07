@@ -19,19 +19,17 @@ namespace AxML::detail {
 
     class LinearModelProblem {
     public:
-        template<typename DerivedX, typename DerivedY>
-        LinearModelProblem(const Eigen::MatrixBase<DerivedX>& X, const Eigen::MatrixBase<DerivedY>& y, LossFunc loss, RegularizationFunc reg)
-            : X_(X), y_(y), loss_fn_(std::move(loss)), reg_fn_(std::move(reg)) {
-            AXML_MATR_ASSERT(DerivedX)
-            AXML_FVEC_ASSERT(DerivedY)
-            n_samples_ = X.rows();
-            n_features_ = X.cols();
-            n_outputs_ = y.cols();
-        }
+        LinearModelProblem(const Scalar* X_ptr, const Scalar* y_ptr, const int64_t n_samples,
+            const int64_t n_features, const int64_t n_outputs,
+            LossFunc loss, RegularizationFunc reg)
+            : X_ptr(X_ptr), y_ptr(y_ptr), n_samples_(n_samples), n_features_(n_features), n_outputs_(n_outputs), loss_fn_(std::move(loss)), reg_fn_(std::move(reg))
+        {}
 
         // Compute loss
         Scalar operator()(const Vector& params, Vector& grad) {
             // unpack parameters into weights and biases
+            const auto X_ = Eigen::Map<const MatrixC>(X_ptr, n_samples_, n_features_);
+            const auto y_ = Eigen::Map<const MatrixC>(y_ptr, n_samples_, n_outputs_);
             auto W = Eigen::Map<const MatrixR>(
                 params.data(), n_features_, n_outputs_
             );
@@ -40,7 +38,7 @@ namespace AxML::detail {
             );
 
             // predictions = X * W + b
-            MatrixR predictions = (X_ * W).rowwise() + b.transpose();
+            MatrixC predictions = (X_ * W).rowwise() + b.transpose();
 
             // compute data loss and gradient
             auto [loss_value, loss_gradient] = std::visit(
@@ -75,23 +73,22 @@ namespace AxML::detail {
         }
 
     private:
-        const MatrixR& X_;
-        const MatrixR& y_;
-        LossFunc loss_fn_;
-        RegularizationFunc reg_fn_;
+        const Scalar* X_ptr;
+        const Scalar* y_ptr;
         int64_t n_samples_;
         int64_t n_features_;
         int64_t n_outputs_;
+        LossFunc loss_fn_;
+        RegularizationFunc reg_fn_;
     };
 
     // LINEAR MODEL BASE (uses LBFGS)
-    class LinearModelLBFGS {
+    /*class LinearModelLBFGS {
     public:
         LinearModelLBFGS(LossFunc loss, RegularizationFunc reg, const Scalar tolerance = 1e-6)
             : reg_fn_(std::move(reg)), loss_fn_(std::move(loss)), tol_(tolerance), fitted_(false) {}
 
-        template<typename DerivedX, typename DerivedY>
-        void fit(const Eigen::MatrixBase<DerivedX>& X, const Eigen::MatrixBase<DerivedY>& y, const int max_iterations = 100) {
+        void fit(const ConstMatRRef& X, const Eigen::MatrixBase<DerivedY>& y, const int max_iterations = 100) {
             AXML_MATR_ASSERT(DerivedX)
             AXML_FVEC_ASSERT(DerivedY)
             n_features_ = X.cols();
@@ -173,10 +170,10 @@ namespace AxML::detail {
         int64_t n_outputs_{};
         int64_t iterations_{};
         bool fitted_;
-    };
+    };*/
 
     // Simple Linear Regression (MSE Loss)
-    class LinearRegression : public LinearModelLBFGS {
+    /*class LinearRegression : public LinearModelLBFGS {
     public:
         explicit LinearRegression(RegularizationFunc reg = NoRegularization{})
             : LinearModelLBFGS(MSELoss{}, std::move(reg)) {}
@@ -201,7 +198,7 @@ namespace AxML::detail {
     public:
         explicit ElasticNetRegression(Scalar l1_ratio = 0.5f, Scalar alpha = 1.0f)
             : LinearModelLBFGS(MSELoss{}, ElasticNetRegularization{l1_ratio * alpha, (1 - l1_ratio) * alpha}) {}
-    };
+    };*/
 }
 
 #endif //AXML_LINEAR_BASE_HPP

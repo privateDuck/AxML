@@ -188,10 +188,10 @@ struct MLPParams {
   Scalar beta_2 = 0.99; // adam
   Scalar epsilon = 1e-6; // adam
   Scalar momentum = 0.0; // sgd
-  Scalar tolerance = 1e-6;
+  Scalar tolerance = 1e-4;
   i32 batch_size = 64;
-  i32 max_iter = 10000;
-  std::function<void(Scalar, Scalar, i32)> callback_fn; // Called per batch. (data_loss, regularization_loss, iteration)
+  i32 max_iter = 100;
+  std::function<void(Scalar, i32)> callback_fn; // Called per batch. (data_loss, regularization_loss, iteration)
 };
 
 } // namespace AxML

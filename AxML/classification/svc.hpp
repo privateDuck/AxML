@@ -9,71 +9,6 @@
 
 namespace AxML {
 
-    namespace detail {
-
-        class MultiHingeProblem {
-        public:
-        MultiHingeProblem(const MatrixR& X, const Vector& y, RegularizationFunc reg)
-            : X_(X), y_(y), loss_fn_(MultiHingeLoss{}), reg_fn_(std::move(reg)) {
-            n_samples_ = X.rows();
-            n_features_ = X.cols();
-            n_outputs_ = y.cols();
-        }
-
-        // Compute loss
-        Scalar operator()(const Vector& params, Vector& grad) {
-            // unpack parameters into weights and biases
-            auto W = Eigen::Map<const MatrixR>(
-                params.data(), n_features_, n_outputs_
-            );
-            auto b = Eigen::Map<const Vector>(
-                params.data() + n_features_ * n_outputs_, n_outputs_
-            );
-
-            // predictions = X * W + b
-            MatrixR predictions = (X_ * W).rowwise() + b.transpose();
-
-            // compute data loss and gradient
-            auto [loss_value, loss_gradient] = loss_fn_.forward(predictions, y_);
-
-            // compute regularization
-            auto [penalty, weight_gradient] = std::visit(
-                [&](const auto& reg) { return reg.compute(W); },
-                reg_fn_
-            );
-
-            const Scalar total_loss = loss_value + penalty;
-
-            // compute gradients
-            // dL/dW = X^T * loss_gradient + reg_gradient
-            const MatrixR grad_W = X_.transpose() * loss_gradient + weight_gradient;
-
-            // dL/db = sum(loss_gradient) across samples
-            const Vector grad_b = loss_gradient.colwise().sum();
-
-            // Pack gradients into single vector
-            Eigen::Map<MatrixR>(grad.data(), n_features_, n_outputs_) = grad_W;
-            Eigen::Map<Vector>(grad.data() + n_features_ * n_outputs_, n_outputs_) = grad_b;
-
-            return total_loss;
-        }
-
-        [[nodiscard]] int64_t num_params() const {
-            return n_features_ * n_outputs_ + n_outputs_;
-        }
-
-    private:
-        const MatrixR &X_;
-        const Vector &y_;
-        MultiHingeLoss loss_fn_;
-        RegularizationFunc reg_fn_;
-        int64_t n_samples_;
-        int64_t n_features_;
-        int64_t n_outputs_;
-    };
-
-    }
-
     class RBFSVC;
 
     class LinearSVC : public Classifier {
@@ -141,10 +76,11 @@ namespace AxML {
                 n_features_ = X.cols();
                 n_outputs_ = y.cols();
 
+                const MatrixC Xc = X; // Copy to change storage order
                 const auto y_span = std::span(y.data(), y.size());
                 encoder_.fit(y_span);
                 const auto y_enc_scalar = encoder_.transform_to_float(y_span);
-                const auto y_enc_vector = Eigen::Map<const Vector>(y_enc_scalar.data(), y_enc_scalar.size());
+                // const auto y_enc_vector = Eigen::Map<const Vector>(y_enc_scalar.data(), y_enc_scalar.size());
 
                 // Initialize parameters (Xavier initialization)
                 const Scalar limit = std::sqrt(6.0f / static_cast<Scalar>(n_features_ + n_outputs_));
@@ -156,10 +92,9 @@ namespace AxML {
                 Eigen::Map<MatrixR>(params.data(), n_features_, n_outputs_) = weights_;
                 Eigen::Map<Vector>(params.data() + n_features_ * n_outputs_, n_outputs_) = biases_;
 
-                // Create optimization problem
-                // TODO: There is an inefficiency here. y_enc_vector is copied since the expected type is MatrixR
-                // Fixed
-                detail::MultiHingeProblem problem(X, y_enc_vector, reg_fn_);
+                // Create optimization problem.
+                // problem expects Column major order of X
+                detail::LinearModelProblem problem(Xc.data(), y_enc_scalar.data(), X.rows(), X.cols(), 1, loss_fn_, reg_fn_);
 
                 // Setup LBFGS
                 LBFGSpp::LBFGSParam<Scalar> param;
@@ -194,6 +129,7 @@ namespace AxML {
         LabelEncoderInternal encoder_;
         MatrixR weights_;
         detail::RegularizationFunc reg_fn_;
+        detail::LossFunc loss_fn_ = detail::MultiHingeLoss{};
         Vector biases_;
         Scalar tol_;
         Scalar C_;

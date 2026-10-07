@@ -5,6 +5,7 @@
 #include "AxML/AxML.hpp"
 #include "boundary_data.hpp"
 #include "AxML/discriminant_analysis.hpp"
+#include "AxML/mlp.hpp"
 
 static const std::filesystem::path TEST_DIR = AXML_TEST_DIR;
 
@@ -60,6 +61,9 @@ void write_predictions(const std::string& filename, const std::span<const int> p
 
 void test_decision_tree_classifier() {
     std::cout << "--- Running Decision Tree Tests ---\n";
+    Eigen::Map<const AxML::MatrixR> X(X_train.data(), N_TRAIN, 2);
+    Eigen::Map<const AxML::VectorI> y(y_train.data(), N_TRAIN);
+    Eigen::Map<const AxML::MatrixR> X_grid_mat(X_grid.data(), N_GRID, 2);
 
     for (const auto&[test_name, max_depth, random_state] : decisiontree_configs) {
         std::cout << "Testing config: " << test_name << "...\n";
@@ -71,11 +75,8 @@ void test_decision_tree_classifier() {
         params.max_features = "all";
         params.random_state = random_state;
         AxML::DecisionTreeClassifier model(params);
-        Eigen::Map<const AxML::MatrixR> X(X_train.data(), N_TRAIN, 2);
-        Eigen::Map<const AxML::VectorI> y(y_train.data(), N_TRAIN);
         model.fit(X, y);
 
-        Eigen::Map<const AxML::MatrixR> X_grid_mat(X_grid.data(), N_GRID, 2);
         AxML::VectorI my_preds = model.predict(X_grid_mat);
 
         auto end = std::chrono::high_resolution_clock::now();
@@ -89,6 +90,10 @@ void test_decision_tree_classifier() {
 void test_random_forest_classifier() {
     std::cout << "--- Running Random Forest Tests ---\n";
 
+    Eigen::Map<const AxML::MatrixR> X(X_train.data(), N_TRAIN, 2);
+    Eigen::Map<const AxML::VectorI> y(y_train.data(), N_TRAIN);
+    Eigen::Map<const AxML::MatrixR> X_grid_mat(X_grid.data(), N_GRID, 2);
+
     for (const auto& tc : randomforest_configs) {
         std::cout << "Testing config: " << tc.test_name << "...\n";
 
@@ -101,9 +106,6 @@ void test_random_forest_classifier() {
         params.random_state = tc.random_state;
         params.n_threads = 1;
         AxML::RandomForestClassifier model(params);
-        Eigen::Map<const AxML::MatrixR> X(X_train.data(), N_TRAIN, 2);
-        Eigen::Map<const AxML::VectorI> y(y_train.data(), N_TRAIN);
-        Eigen::Map<const AxML::MatrixR> X_grid_mat(X_grid.data(), N_GRID, 2);
         model.fit(X, y);
 
         AxML::VectorI my_preds = model.predict(X_grid_mat);
@@ -139,8 +141,51 @@ void test_lda_classifier() {
     }
 }
 
+void test_mlp_classifier() {
+    std::cout << "--- Running LDA Tests ---\n";
+    const Eigen::Map<const AxML::MatrixR> X(X_train.data(), N_TRAIN, 2);
+    Eigen::Map<const AxML::VectorI> y(y_train.data(), N_TRAIN);
+    Eigen::Map<const AxML::MatrixR> X_grid_mat(X_grid.data(), N_GRID, 2);
+
+    AxML::Vector mean = X.colwise().mean();
+    AxML::MatrixR centered = X.rowwise() - mean.transpose();
+
+    // Calculate standard deviation (add small epsilon to avoid div by zero)
+    AxML::Vector stddev = (centered.array().square().colwise().sum() / (X.rows() - 1)).sqrt();
+    AxML::Vector safe_stddev = stddev.cwiseMax(1e-8f);
+
+    // Scale X
+    AxML::MatrixR X_scaled = centered.array().rowwise() / safe_stddev.transpose().array();
+    AxML::MatrixR X_grid_scaled = (X_grid_mat.rowwise() - mean.transpose()).array().rowwise() / safe_stddev.transpose().array();
+
+    for (const auto& tc : mcpc_configs) {
+        std::cout << "Testing config: " << tc.test_name << "...\n";
+
+        auto start = std::chrono::high_resolution_clock::now();
+        AxML::MLPParams params;
+        params.solver = "adam";
+        params.activation = tc.activation;
+        params.batch_size = 32;
+        params.max_iter = 500;
+        params.learning_rate = 0.01;
+        params.momentum = 0.9;
+        params.hidden_layers = tc.hidden_layer_sizes;
+        // params.
+        AxML::MLPClassifier model(params);
+        model.fit(X, y);
+        AxML::VectorI my_preds = model.predict(X_grid_mat);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed = end - start;
+
+        std::cout << "[COMPLETED] " << tc.test_name << " in " << elapsed.count() << " ms\n";
+        write_predictions("cpp_preds_" + tc.test_name + ".csv", my_preds);
+    }
+}
+
 int main() {
-    test_decision_tree_classifier();
     test_random_forest_classifier();
+    test_decision_tree_classifier();
     test_lda_classifier();
+    test_mlp_classifier();
 }

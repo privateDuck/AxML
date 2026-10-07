@@ -37,7 +37,7 @@ namespace AxML {
 
         uint32_t type_id() const override;
 
-        void fit(const MatrixR &X) override {
+        void fit(const ConstMatRRef &X) override {
             if (use_full_svd_) {
                 const Eigen::JacobiSVD<MatrixC> svd(X, Eigen::ComputeThinU | Eigen::ComputeThinV);
                 projection_matrix_ = svd.matrixV().leftCols(n_components_);
@@ -51,7 +51,7 @@ namespace AxML {
             fitted_ = true;
         }
 
-        MatrixR transform(const MatrixR &X) const override {
+        MatrixR transform(const ConstMatRRef &X) const override {
             if (!fitted_) {
                 throw std::runtime_error("PCA not fitted yet!");
             }
@@ -59,7 +59,7 @@ namespace AxML {
             return X_scaled * projection_matrix_;
         }
 
-        MatrixR fit_transform(const MatrixR &X) override {
+        MatrixR fit_transform(const ConstMatRRef &X) override {
             fit(X);
             return transform(X);
         }

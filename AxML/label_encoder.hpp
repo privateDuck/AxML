@@ -12,14 +12,10 @@ namespace AxML {
 
 class LabelEncoderInternal {
 public:
-    LabelEncoderInternal() {}
-    LabelEncoderInternal(const LabelEncoderInternal& other) : r_to_s_(other.r_to_s_) , s_to_r_(other.s_to_r_) {}
+    LabelEncoderInternal() = default;
+    LabelEncoderInternal(const LabelEncoderInternal& other) = default;
     LabelEncoderInternal(LabelEncoderInternal&& other) noexcept : r_to_s_(std::move(other.r_to_s_)), s_to_r_(std::move(other.s_to_r_)) {}
-    LabelEncoderInternal& operator=(const LabelEncoderInternal& other) {
-        r_to_s_ = other.r_to_s_;
-        s_to_r_ = other.s_to_r_;
-        return *this;
-    }
+    LabelEncoderInternal& operator=(const LabelEncoderInternal& other) = default;
     LabelEncoderInternal& operator=(LabelEncoderInternal&& other) noexcept {
         r_to_s_ = std::move(other.r_to_s_);
         s_to_r_ = std::move(other.s_to_r_);
@@ -45,7 +41,7 @@ public:
         }
     }
 
-    std::vector<i32> transform(const std::span<const i32> input) const {
+    [[nodiscard]] std::vector<i32> transform(const std::span<const i32> input) const {
         std::vector<i32> encoded;
         encoded.reserve(input.size());
 
@@ -60,7 +56,7 @@ public:
         return encoded;
     }
 
-    std::vector<Scalar> transform_to_float(const std::span<const i32> input) const {
+    [[nodiscard]] std::vector<Scalar> transform_to_float(const std::span<const i32> input) const {
         std::vector<Scalar> encoded;
         encoded.reserve(input.size());
 
@@ -76,7 +72,43 @@ public:
         return encoded;
     }
 
-    i32 inverse_transform(const i32 s_label) const {
+    [[nodiscard]] std::vector<Scalar> transform_to_onehot_col_major(const std::span<const i32> input) const {
+        const auto rows = input.size();
+        const auto cols = num_unique_labels();
+        std::vector encoded(cols * rows, 0.0);
+
+        for (i32 row = 0; row < rows; ++row) {
+            auto it = r_to_s_.find(input[row]);
+            if (it == r_to_s_.end()) {
+                throw std::invalid_argument("Unseen R space value encountered during transform.");
+            }
+            const auto index = it->second * rows + row;
+            // Cast the integer label to a Scalar representation
+            encoded[index] = 1.0;
+        }
+
+        return encoded;
+    }
+
+    [[nodiscard]] std::vector<Scalar> transform_to_onehot_row_major(const std::span<const i32> input) const {
+        const auto rows = input.size();
+        const auto cols = num_unique_labels();
+        std::vector encoded(cols * rows, 0.0);
+
+        for (i32 row = 0; row < rows; ++row) {
+            auto it = r_to_s_.find(input[row]);
+            if (it == r_to_s_.end()) {
+                throw std::invalid_argument("Unseen R space value encountered during transform.");
+            }
+            const auto index = row * cols + it->second;
+            // Cast the integer label to a Scalar representation
+            encoded[index] = 1.0;
+        }
+
+        return encoded;
+    }
+
+    [[nodiscard]] i32 inverse_transform(const i32 s_label) const {
         // Bounds checking
         if (s_label < 0 || static_cast<size_t>(s_label) >= s_to_r_.size()) {
             throw std::out_of_range("S space label out of bounds.");
@@ -85,7 +117,7 @@ public:
         return s_to_r_[s_label];
     }
 
-    std::vector<i32> inverse_transform(const std::span<const i32> input) const {
+    [[nodiscard]] std::vector<i32> inverse_transform(const std::span<const i32> input) const {
         std::vector<i32> decoded;
         decoded.reserve(input.size());
 
@@ -96,7 +128,7 @@ public:
         return decoded;
     }
 
-    i32 num_unique_labels() const {
+    [[nodiscard]] i32 num_unique_labels() const {
         return static_cast<i32>(r_to_s_.size());
     }
 

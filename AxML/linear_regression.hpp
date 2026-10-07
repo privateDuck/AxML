@@ -87,7 +87,8 @@ namespace AxML {
                 Eigen::Map<Vector>(params.data() + n_features_ * n_outputs_, n_outputs_) = biases_;
 
                 // Create optimization problem
-                detail::LinearModelProblem problem(X, y, loss_fn_, reg_fn_);
+                const MatrixC Xc = X;
+                detail::LinearModelProblem problem(Xc.data(), y.data(), X.rows(), X.cols(), 1, loss_fn_, reg_fn_);
 
                 // Setup LBFGS
                 LBFGSpp::LBFGSParam<Scalar> param;
@@ -187,7 +188,8 @@ namespace AxML {
                 Eigen::Map<Vector>(params.data() + n_features_ * n_outputs_, n_outputs_) = biases_;
 
                 // Create optimization problem
-                detail::LinearModelProblem problem(X, y, loss_fn_, reg_fn_);
+                const MatrixC Xc = X;
+                detail::LinearModelProblem problem(Xc.data(), y.data(), X.rows(), X.cols(), 1, loss_fn_, reg_fn_);
 
                 // Setup LBFGS
                 LBFGSpp::LBFGSParam<Scalar> param;
@@ -288,7 +290,8 @@ namespace AxML {
                 Eigen::Map<Vector>(params.data() + n_features_ * n_outputs_, n_outputs_) = biases_;
 
                 // Create optimization problem
-                detail::LinearModelProblem problem(X, y, loss_fn_, reg_fn_);
+                const MatrixC Xc = X;
+                detail::LinearModelProblem problem(Xc.data(), y.data(), X.rows(), X.cols(), 1, loss_fn_, reg_fn_);
 
                 // Setup LBFGS
                 LBFGSpp::LBFGSParam<Scalar> param;
@@ -391,7 +394,8 @@ namespace AxML {
                 Eigen::Map<Vector>(params.data() + n_features_ * n_outputs_, n_outputs_) = biases_;
 
                 // Create optimization problem
-                detail::LinearModelProblem problem(X, y, loss_fn_, reg_fn_);
+                const MatrixC Xc = X;
+                detail::LinearModelProblem problem(Xc.data(), y.data(), X.rows(), X.cols(), 1, loss_fn_, reg_fn_);
 
                 // Setup LBFGS
                 LBFGSpp::LBFGSParam<Scalar> param;

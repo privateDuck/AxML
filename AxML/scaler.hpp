@@ -39,7 +39,7 @@ namespace AxML {
             }*/
         }
 
-        MatrixR transform(const MatrixR &X) const override {
+        MatrixR transform(const ConstMatRRef &X) const override {
             if (!fitted_) {
                 throw std::runtime_error("Scaler not fitted yet!");
             }
@@ -49,14 +49,14 @@ namespace AxML {
             return (X.rowwise() - mean_.transpose()).array().rowwise() / std_.transpose().array();
         }
 
-        MatrixR fit_transform(const MatrixR &X) override {
+        MatrixR fit_transform(const ConstMatRRef &X) override {
             if (!fitted_) {
                 fit(X);
             }
             return transform(X);
         }
 
-        MatrixR inverse_transform(const MatrixR &X) const override {
+        MatrixR inverse_transform(const ConstMatRRef &X) const override {
             if (!fitted_) {
                 throw std::runtime_error("Scaler not fitted yet!");
             }
@@ -93,7 +93,7 @@ namespace AxML {
 
         uint32_t type_id() const override;
 
-        void fit(const MatrixR &X) override {
+        void fit(const ConstMatRRef &X) override {
             if (X.rows() == 0) {
                 throw std::invalid_argument("Input matrix X must have an empty row.");
             }
@@ -101,21 +101,21 @@ namespace AxML {
             ranges_ = X.colwise().maxCoeff() - mins_;
         }
 
-        MatrixR transform(const MatrixR &X) const override {
+        MatrixR transform(const ConstMatRRef &X) const override {
             if (!fitted_) {
                 throw std::runtime_error("Scaler not fitted yet!");
             }
             return (X.rowwise() - mins_.transpose()).array() / ranges_.transpose().array();
         }
 
-        MatrixR fit_transform(const MatrixR &X) override {
+        MatrixR fit_transform(const ConstMatRRef &X) override {
             if (!fitted_) {
                 fit(X);
             }
             return transform(X);
         }
 
-        MatrixR inverse_transform(const MatrixR &X) const override {
+        MatrixR inverse_transform(const ConstMatRRef &X) const override {
             if (!fitted_) {
                 throw std::runtime_error("Scaler not fitted yet!");
             }

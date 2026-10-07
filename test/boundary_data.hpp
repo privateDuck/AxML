@@ -90,3 +90,15 @@ inline const std::vector<QDAConfig> qda_configs = {
     {"QDA_0"},
 };
 
+struct MCPCConfig {
+    std::string test_name;
+    std::vector<int> hidden_layer_sizes;
+    std::string activation;
+    int max_iter;
+    int random_state;
+};
+
+inline const std::vector<MCPCConfig> mcpc_configs = {
+    {"MCPC_0", {10, 4}, "relu", 500, 42},
+};
+

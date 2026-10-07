@@ -60,10 +60,9 @@ def main():
         "NaiveBayes": (GaussianNB, [{}]),
         "LDA": (LinearDiscriminantAnalysis, [{}]),
         "QDA": (QuadraticDiscriminantAnalysis, [{}]),
-        "MCPC": (MLPClassifier, [{}])
+        "MCPC": (MLPClassifier, [{"hidden_layer_sizes": [10, 4], "activation": "relu", "max_iter": 500, "random_state": 42}])
     }
 
-    mcp = MLPClassifier()
 
     # Start building the C++ header
     cpp_code = "#pragma once\n#include <vector>\n#include <string>\n#include \"../AxML/common.hpp\"\n\n"
