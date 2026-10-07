@@ -233,7 +233,7 @@ namespace AxML {
             fitted_ = true;
         }
 
-        static std::tuple<MatrixC, vec<i32>, LabelEncoderInternal> prepare_shared_data(const MatrixR& X, const VectorI& y) {
+        static std::tuple<MatrixC, vec<i32>, LabelEncoderInternal> prepare_shared_data(const ConstMatRRef& X, const ConstVecIRef& y) {
             if (X.rows() != y.size()) {
                 throw std::invalid_argument("Size mismatch. X.rows() must be equal to y.size()");
             }
@@ -247,7 +247,7 @@ namespace AxML {
             return {std::move(Xc), std::move(y_enc), std::move(encoder_internal)};
         }
 
-        [[nodiscard]] i32 predict_node(const MatrixR& X, const i32 row) const {
+        [[nodiscard]] i32 predict_node(const ConstMatRRef& X, const i32 row) const {
             i32 node = 0;
             while (tree_.get_left_child_index(node) != -1) {
                 node = X(row, tree_.get_feature_index(node)) <= tree_.get_node_threshold(node)
@@ -265,7 +265,7 @@ namespace AxML {
             return node;
         }
 
-        void predict_proba_aggregate(const MatrixR& X, MatrixR& preds) const {
+        void predict_proba_aggregate(const ConstMatRRef& X, MatrixR& preds) const {
             for (i32 i = 0; i < X.rows(); ++i) {
                 auto node_proba = tree_.get_leaf_value(predict_node(X, i));
                 preds.row(i) += Eigen::Map<const Eigen::RowVectorX<double>, Eigen::Unaligned>(node_proba.data(), n_classes_);
