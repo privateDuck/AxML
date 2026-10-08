@@ -10,25 +10,19 @@ namespace AxML {
 
     class LogisticRegression : public Classifier {
     public:
-        explicit LogisticRegression(
-            const RegularizationType regularization = RegularizationType::NONE,
-            const int64_t max_iter = 10000, const Scalar tolerance = 1e-6, const Scalar l1_reg = 0.01, const Scalar l2_reg = 0.01
-        )
-        : tol_(tolerance), max_iter_(max_iter), fitted_(false) {
-            switch (regularization) {
-                case RegularizationType::L1:
-                    reg_fn_ = detail::L1Regularization{l1_reg};
-                    break;
-                case RegularizationType::L2:
-                    reg_fn_ = detail::L2Regularization{l2_reg};
-                    break;
-                case RegularizationType::ElasticNet:
-                    reg_fn_ = detail::ElasticNetRegularization{l1_reg, l2_reg};
-                    break;
-                case RegularizationType::NONE:
-                default:
-                    reg_fn_ = detail::NoRegularization{};
-                    break;
+        explicit LogisticRegression(const LogisticRegressionParams& params = LogisticRegressionParams())
+        : tol_(params.tolerance), max_iter_(params.max_iterations), fitted_(false) {
+            if (params.regularization == "l1") {
+                reg_fn_ = detail::L1Regularization{params.l1_regularization};
+            }
+            else if (params.regularization == "l2") {
+                reg_fn_ = detail::L2Regularization{params.l2_regularization};
+            }
+            else if (params.regularization == "elastic_net") {
+                reg_fn_ = detail::ElasticNetRegularization{params.l1_regularization, params.l2_regularization};
+            }
+            else {
+                reg_fn_ = detail::NoRegularization{};
             }
         }
 
@@ -37,12 +31,12 @@ namespace AxML {
                 throw std::runtime_error(std::format("Model was fitted with {} dimensions. X has {} dimensions", n_features_, X.cols()));
             }
 
-            MatrixR probs = predict_proba(X);
-            VectorI labels(probs.rows());
+            const MatrixR logits = (X * weights_).rowwise() + biases_.transpose();
+            VectorI labels(logits.rows());
 
-            for (int i = 0; i < probs.rows(); ++i) {
+            for (int i = 0; i < logits.rows(); ++i) {
                 Eigen::Index max_idx;
-                probs.row(i).maxCoeff(&max_idx);
+                logits.row(i).maxCoeff(&max_idx);
                 labels(i) = encoder_.inverse_transform(max_idx);
             }
 
@@ -65,10 +59,12 @@ namespace AxML {
             return softmax.forward(logits).output;
         }
 
-        void save(OutputArchive& ar) const override;
-        void load(InputArchive& ar) override;
+        void save(OutputArchive& ar) const override {}
+        void load(InputArchive& ar) override {}
 
-        std::unique_ptr<Estimator> clone() const override;
+        std::unique_ptr<Estimator> clone() const override {
+            return std::make_unique<LogisticRegression>(*this);
+        }
 
         bool is_fitted() const override {return fitted_;}
         uint64_t dims() const override{return n_features_;}
@@ -93,10 +89,10 @@ namespace AxML {
         void fit_impl(const ConstMatRRef& X, const ConstVecIRef& y) override {
             if (!fitted_) {
                 n_features_ = X.cols();
-                n_outputs_ = y.cols();
                 const std::span<const i32> span_y(y.data(), y.size());
                 encoder_.fit(span_y);
-                const std::vector<Scalar> y_enc = encoder_.transform_to_float(span_y);
+                n_outputs_ = encoder_.num_unique_labels();
+                const std::vector<Scalar> y_enc = encoder_.transform_to_onehot_col_major(span_y);
 
                 // Initialize parameters (Xavier initialization)
                 const Scalar limit = std::sqrt(6.0f / static_cast<Scalar>(n_features_ + n_outputs_));
@@ -110,7 +106,7 @@ namespace AxML {
 
                 // Create optimization problem
                 const MatrixC Xc = X;
-                detail::LinearModelProblem problem(Xc.data(), y_enc.data(), X.rows(), X.cols(), 1, loss_fn_, reg_fn_);
+                detail::LinearModelProblem problem(Xc.data(), y_enc.data(), Xc.rows(), n_features_, n_outputs_, loss_fn_, reg_fn_);
 
                 // Setup LBFGS
                 LBFGSpp::LBFGSParam<Scalar> param;
@@ -138,7 +134,7 @@ namespace AxML {
         LabelEncoderInternal encoder_;
         detail::RegularizationFunc reg_fn_;
         Vector biases_;
-        detail::LossFunc loss_fn_ = detail::CrossEntropyLoss{};
+        detail::LossFunc loss_fn_ = detail::CrossEntropyWithLogitsLoss{};
         Scalar tol_;
         Scalar last_loss_{};
         int64_t n_features_{};

@@ -333,9 +333,9 @@ namespace AxML::detail {
     };
 
     struct MultiHingeLoss {
-        Scalar margin = 1.0f;
+        Scalar margin = 1.0;
 
-        explicit MultiHingeLoss(const Scalar m = 1.0f) : margin(m) {}
+        explicit MultiHingeLoss(const Scalar m = 1.0) : margin(m) {}
 
         LossResult forward(const ConstMatCRef& predictions, const ConstMatCRef& targets) const {
             const Scalar n = static_cast<Scalar>(predictions.rows());
@@ -354,7 +354,7 @@ namespace AxML::detail {
                     const Scalar loss_ij = margin - correct_score + predictions(i, j);
                     if (loss_ij > 0) {
                         total_loss += loss_ij;
-                        grad(i, j) = 1.0f;
+                        grad(i, j) = 1.0;
                         violation_count++;
                     }
                 }
@@ -388,10 +388,72 @@ namespace AxML::detail {
         }
     };
 
+    struct SquaredMultiHingeLoss {
+        Scalar margin = 0.5;
+
+        explicit SquaredMultiHingeLoss(const Scalar m = 0.5) : margin(m) {}
+
+        [[nodiscard]] LossResult forward(const ConstMatCRef& predictions, const ConstMatCRef& targets) const {
+            const auto n = static_cast<Scalar>(predictions.rows());
+            Scalar total_loss = 0;
+            MatrixC grad = MatrixC::Zero(predictions.rows(), predictions.cols());
+
+            for (int i = 0; i < n; ++i) {
+                int correct_class;
+                targets.row(i).maxCoeff(&correct_class);
+                const Scalar correct_score = predictions(i, correct_class);
+
+                Scalar correct_class_grad = 0; // Track gradient for the correct class directly
+
+                for (int j = 0; j < predictions.cols(); ++j) {
+                    if (j == correct_class) continue;
+
+                    const Scalar margin_diff = margin - correct_score + predictions(i, j);
+                    if (margin_diff > 0) {
+                        // Sq Hinge Loss
+                        total_loss += (margin_diff * margin_diff);
+
+                        // Derivative of max(0, x)^2 is 2 * max(0, x)
+                        const Scalar grad_val = static_cast<Scalar>(2.0) * margin_diff;
+
+                        grad(i, j) = grad_val;
+                        correct_class_grad -= grad_val; // Chain rule for the negative term
+                    }
+                }
+
+                grad(i, correct_class) = correct_class_grad;
+            }
+
+            return {total_loss / n, grad / n};
+        }
+
+        [[nodiscard]] Scalar forward_wo_grad(const ConstMatCRef& predictions, const ConstMatCRef& targets) const {
+            const auto n = static_cast<Scalar>(predictions.rows());
+            Scalar total_loss = 0;
+
+            for (int i = 0; i < n; ++i) {
+                int correct_class;
+                targets.row(i).maxCoeff(&correct_class);
+                const Scalar correct_score = predictions(i, correct_class);
+
+                for (int j = 0; j < predictions.cols(); ++j) {
+                    if (j == correct_class) continue;
+
+                    const Scalar margin_diff = margin - correct_score + predictions(i, j);
+                    if (margin_diff > 0) {
+                        total_loss += (margin_diff * margin_diff);
+                    }
+                }
+            }
+
+            return total_loss / n;
+        }
+    };
+
     struct ZeroOneLoss {
         // Non-differentiable, for evaluation only
-        LossResult forward(const ConstVecRef& predictions, const ConstVecRef& targets) const {
-            const Scalar n = static_cast<Scalar>(predictions.rows());
+        [[nodiscard]] LossResult forward(const ConstVecRef& predictions, const ConstVecRef& targets) const {
+            const auto n = static_cast<Scalar>(predictions.rows());
             Scalar errors = 0;
 
             for (int i = 0; i < n; ++i) {
@@ -419,7 +481,7 @@ namespace AxML::detail {
         }
     };
 
-    using LossFunc = std::variant<MSELoss, MAELoss, CrossEntropyLoss, CrossEntropyWithLogitsLoss, HuberLoss, MultiHingeLoss, ZeroOneLoss>; // Multi Hinge Loss not part of this anymore.
+    using LossFunc = std::variant<MSELoss, MAELoss, CrossEntropyLoss, CrossEntropyWithLogitsLoss, HuberLoss, MultiHingeLoss, SquaredMultiHingeLoss, ZeroOneLoss>; // Multi Hinge Loss not part of this anymore.
 }
 
 #endif //AXML_FEEDFORWARD_BASE_HPP

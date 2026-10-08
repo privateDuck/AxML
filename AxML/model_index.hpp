@@ -14,6 +14,8 @@ namespace AxML {
         ID_RF_REGRESSION = 5,
         ID_KNN_REGRESSION = 6,
         ID_MLP_REGRESSION = 7,
+        ID_SV_REGRESSION = 8,
+        ID_NUSV_REGRESSION = 9,
 
         ID_LOGISTIC_REGRESSION = 30,
         ID_DT_CLASSIFIER = 31,
@@ -25,9 +27,12 @@ namespace AxML {
         ID_LDA_CLASSIFIER = 37,
         ID_QDA_CLASSIFIER = 38,
         ID_MLP_CLASSIFIER = 39,
+        ID_SV_CLASSIFIER = 40,
+        ID_NUSV_CLASSIFIER = 41,
 
         ID_ISOLATION_FOREST = 100,
         ID_DEEP_ISOLATION_FOREST = 101,
+        ID_ONE_CLASS_SVM = 102,
 
         ID_KMEANS = 200,
     };

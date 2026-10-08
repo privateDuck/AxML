@@ -6,6 +6,8 @@
 #include "boundary_data.hpp"
 #include "AxML/discriminant_analysis.hpp"
 #include "AxML/mlp.hpp"
+#include "AxML/classification/logistic.hpp"
+#include "AxML/classification/svc.hpp"
 
 static const std::filesystem::path TEST_DIR = AXML_TEST_DIR;
 
@@ -142,7 +144,7 @@ void test_lda_classifier() {
 }
 
 void test_mlp_classifier() {
-    std::cout << "--- Running LDA Tests ---\n";
+    std::cout << "--- Running MLP Tests ---\n";
     const Eigen::Map<const AxML::MatrixR> X(X_train.data(), N_TRAIN, 2);
     Eigen::Map<const AxML::VectorI> y(y_train.data(), N_TRAIN);
     Eigen::Map<const AxML::MatrixR> X_grid_mat(X_grid.data(), N_GRID, 2);
@@ -183,9 +185,97 @@ void test_mlp_classifier() {
     }
 }
 
+void test_logistic_classifier() {
+    std::cout << "--- Running Logistic Tests ---\n";
+    const Eigen::Map<const AxML::MatrixR> X(X_train.data(), N_TRAIN, 2);
+    Eigen::Map<const AxML::VectorI> y(y_train.data(), N_TRAIN);
+    Eigen::Map<const AxML::MatrixR> X_grid_mat(X_grid.data(), N_GRID, 2);
+
+    AxML::Vector mean = X.colwise().mean();
+    AxML::MatrixR centered = X.rowwise() - mean.transpose();
+
+    // Calculate standard deviation (add small epsilon to avoid div by zero)
+    AxML::Vector stddev = (centered.array().square().colwise().sum() / (X.rows() - 1)).sqrt();
+    AxML::Vector safe_stddev = stddev.cwiseMax(1e-8f);
+
+    // Scale X
+    AxML::MatrixR X_scaled = centered.array().rowwise() / safe_stddev.transpose().array();
+    AxML::MatrixR X_grid_scaled = (X_grid_mat.rowwise() - mean.transpose()).array().rowwise() / safe_stddev.transpose().array();
+
+    for (const auto& tc : logisticregression_configs) {
+        std::cout << "Testing config: " << tc.test_name << "...\n";
+
+        auto start = std::chrono::high_resolution_clock::now();
+        AxML::LogisticRegressionParams params;
+        params.regularization = "l2";
+        AxML::LogisticRegression model(params);
+        model.fit(X, y);
+        AxML::VectorI my_preds = model.predict(X_grid_mat);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed = end - start;
+
+        std::cout << "[COMPLETED] " << tc.test_name << " in " << elapsed.count() << " ms\n";
+        write_predictions("cpp_preds_" + tc.test_name + ".csv", my_preds);
+    }
+}
+
+void test_svc_classifier() {
+    std::cout << "--- Running svc Tests ---\n";
+    const Eigen::Map<const AxML::MatrixR> X(X_train.data(), N_TRAIN, 2);
+    Eigen::Map<const AxML::VectorI> y(y_train.data(), N_TRAIN);
+    Eigen::Map<const AxML::MatrixR> X_grid_mat(X_grid.data(), N_GRID, 2);
+
+    for (const auto& tc : linearsvc_configs) {
+        std::cout << "Testing config: " << tc.test_name << "...\n";
+
+        auto start = std::chrono::high_resolution_clock::now();
+        AxML::LinearSVCParams params;
+        params.C = tc.C;
+        params.margin = 1.0;
+        AxML::LinearSVC model(params);
+        model.fit(X, y);
+        AxML::VectorI my_preds = model.predict(X_grid_mat);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed = end - start;
+
+        std::cout << "[COMPLETED] " << tc.test_name << " in " << elapsed.count() << " ms\n";
+        write_predictions("cpp_preds_" + tc.test_name + ".csv", my_preds);
+    }
+}
+
+void test_rbfsvc_classifier() {
+    std::cout << "--- Running rbf svc Tests ---\n";
+    const Eigen::Map<const AxML::MatrixR> X(X_train.data(), N_TRAIN, 2);
+    Eigen::Map<const AxML::VectorI> y(y_train.data(), N_TRAIN);
+    Eigen::Map<const AxML::MatrixR> X_grid_mat(X_grid.data(), N_GRID, 2);
+
+    for (const auto& tc : rbfsvc_configs) {
+        std::cout << "Testing config: " << tc.test_name << "...\n";
+
+        auto start = std::chrono::high_resolution_clock::now();
+        AxML::RBFSVCParams params;
+        params.C = tc.C;
+        params.gamma = tc.gamma;
+        AxML::RBFSVC model(params);
+        model.fit(X, y);
+        AxML::VectorI my_preds = model.predict(X_grid_mat);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed = end - start;
+
+        std::cout << "[COMPLETED] " << tc.test_name << " in " << elapsed.count() << " ms\n";
+        write_predictions("cpp_preds_" + tc.test_name + ".csv", my_preds);
+    }
+}
+
 int main() {
     test_random_forest_classifier();
     test_decision_tree_classifier();
     test_lda_classifier();
     test_mlp_classifier();
+    //test_logistic_classifier();
+    test_svc_classifier();
+    test_rbfsvc_classifier();
 }

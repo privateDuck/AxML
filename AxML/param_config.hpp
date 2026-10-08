@@ -22,19 +22,6 @@ struct LogisticRegressionParams {
   Scalar l2_regularization = 0.01;
   /** @brief Tolerance for stopping criteria */
   Scalar tolerance = 1e-6;
-
-  int get_reg() const {
-    if (regularization == "none")
-      return 0;
-    if (regularization == "l1")
-      return 1;
-    if (regularization == "l2")
-      return 2;
-    if (regularization == "elastic_net")
-      return 3;
-    throw std::invalid_argument("Invalid regularization type. (Only 'none', "
-                                "'l1', 'l2', and 'elastic_net' are allowed");
-  }
 };
 
 /**
@@ -150,6 +137,8 @@ struct LinearSVCParams {
   i32 max_iter = 10000;
   /** @brief Tolerance for stopping criteria */
   Scalar tolerance = 1e-6;
+  /** @brief Tolerance for the loss function */
+  Scalar margin = 0.5;
 };
 
 /**
@@ -169,6 +158,12 @@ struct RBFSVCParams {
 };
 
 
+  struct SVCParams {
+    std::string kernel = "rbf"; // rbf, poly, linear, sigmoid
+    Scalar C = 1.0;
+    bool enable_probability_output = false;
+  };
+
   struct LinearRegressorParams {
     std::string regularization = "none";
     i32 max_iter = 10000;
@@ -182,6 +177,7 @@ struct MLPParams {
   std::string activation = "relu"; // relu, tanh, sigmoid, softmax (non-trainable), linear
   std::string solver = "sgd"; // adam, sgd
   std::string regularization = "none";
+  std::string loss = "mse"; // for classification this is ignored and only cross entropy is used. mse and mae for regression
   u64 random_state = 42;
   Scalar learning_rate = 1e-3; // init value
   Scalar beta_1 = 0.9; // adam
