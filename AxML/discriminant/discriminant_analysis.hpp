@@ -2,9 +2,9 @@
 #ifndef AXML_DISCRIMINANT_ANALYSIS_HPP
 #define AXML_DISCRIMINANT_ANALYSIS_HPP
 
-#include "base.hpp"
-#include "tensor3.hpp"
-#include "label_encoder.hpp"
+#include "../core/base.hpp"
+#include "../tensor3.hpp"
+#include "../label_encoder.hpp"
 
 namespace AxML {
 

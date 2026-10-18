@@ -2,7 +2,7 @@
 #ifndef AXML_SCALER_HPP
 #define AXML_SCALER_HPP
 
-#include "base.hpp"
+#include "../core/base.hpp"
 
 namespace AxML {
 

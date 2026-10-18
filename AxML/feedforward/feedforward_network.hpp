@@ -69,15 +69,15 @@ namespace AxML::ff {
             );
 
             // Compute gradients for weights and biases
-            weight_grad = input_cache.transpose() * grad_z;
-            bias_grad = grad_z.colwise().sum().transpose();
+            weight_grad.noalias() = input_cache.transpose() * grad_z;
+            bias_grad.noalias() = grad_z.colwise().sum().transpose();
 
             // Add regularization gradient to weight gradients
             const detail::RegularizationResult reg_result = std::visit(
                 [&](const auto& reg) { return reg.compute(weights); },
                 regularization
             );
-            weight_grad += reg_result.weight_gradient;
+            weight_grad.noalias() += reg_result.weight_gradient;
 
             // Compute gradient w.r.t. input (for previous layer)
             return grad_z * weights.transpose();

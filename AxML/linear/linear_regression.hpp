@@ -4,7 +4,7 @@
 #define AXML_LINEAR_REGRESSION_HPP
 
 #include "base.hpp"
-#include "feedforward/linear_base.hpp"
+#include "../feedforward/linear_base.hpp"
 
 namespace AxML {
 

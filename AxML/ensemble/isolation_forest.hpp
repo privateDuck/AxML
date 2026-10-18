@@ -20,9 +20,9 @@
 #define AXML_ISOLATION_FOREST_HPP
 
 #include <random>
-#include "common.hpp"
-#include "base.hpp"
-#include "flat_tree.hpp"
+#include "../common.hpp"
+#include "../base.hpp"
+#include "../flat_tree.hpp"
 
 namespace AxML {
 

@@ -3,7 +3,7 @@
 #ifndef AXML_SVC_HPP
 #define AXML_SVC_HPP
 
-#include "../base.hpp"
+#include "../core/base.hpp"
 #include "../feedforward/linear_base.hpp"
 #include "../rff.hpp"
 

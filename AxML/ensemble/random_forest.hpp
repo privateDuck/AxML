@@ -3,7 +3,7 @@
 #ifndef AXML_RANDOM_FOREST_HPP
 #define AXML_RANDOM_FOREST_HPP
 
-#include "decision_tree.hpp"
+#include "../tree/decision_tree.hpp"
 #include <algorithm>
 #include <thread>
 

@@ -4,8 +4,8 @@
 #include <filesystem>
 #include "AxML/AxML.hpp"
 #include "boundary_data.hpp"
-#include "AxML/discriminant_analysis.hpp"
-#include "AxML/mlp.hpp"
+#include "../AxML/discriminant/discriminant_analysis.hpp"
+#include "../AxML/nn/mlp.hpp"
 #include "AxML/classification/logistic.hpp"
 #include "AxML/classification/svc.hpp"
 
@@ -270,12 +270,89 @@ void test_rbfsvc_classifier() {
     }
 }
 
+#include "../MiniDNN/include/MiniDNN.h"
+
+void train_minidnn(const Eigen::MatrixXd& X, const Eigen::MatrixXd& y) {
+    using namespace MiniDNN;
+    Network net;
+    Layer* input = new FullyConnected<ReLU>(400, 100);
+    Layer* hidden = new FullyConnected<ReLU>(100, 10);
+    Layer* output = new FullyConnected<Identity>(10, 2);
+    net.add_layer(std::move(input));
+    net.add_layer(std::move(hidden));
+    net.add_layer(output);
+
+    net.set_output(new MultiClassEntropy());
+    Adam opt;
+    net.init();
+    net.fit(opt, X, y, 32, 100);
+}
+
+void train_our(const AxML::MatrixR& X, const AxML::VectorI& y) {
+    AxML::MLPParams params;
+    params.hidden_layers = {100, 10};
+    params.solver = "adam";
+    params.activation = "relu";
+    params.batch_size = 32;
+    params.max_iter = 100;
+    params.learning_rate = 0.001;
+    AxML::MLPClassifier model(params);
+    model.fit(X, y);
+}
+
+void compare_minidnn() {
+
+    Eigen::MatrixXd xm = Eigen::MatrixXd::Random(400, 100);
+    const int num_classes = 2;
+    const int num_observations = 100;
+
+    // 2. Initialize an all-zero matrix
+    Eigen::MatrixXd ym = Eigen::MatrixXd::Zero(num_classes, num_observations);
+
+    // 3. Setup standard C++ random engine for row indices
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution dis(0, num_classes - 1);
+
+    // 4. Populate each column with exactly one '1'
+    for (int col = 0; col < num_observations; ++col) {
+        int random_row = dis(gen);
+        ym(random_row, col) = 1.0;
+    }
+
+    AxML::MatrixR xo = AxML::MatrixR::Random(100, 400);
+    AxML::VectorI yo = AxML::VectorI::Random(100);
+
+    auto minidnn_start = std::chrono::high_resolution_clock::now();
+
+    for (int i = 0; i < 10; ++i) {
+        train_minidnn(xm, ym);
+    }
+
+    auto minidnn_end = std::chrono::high_resolution_clock::now();
+
+    auto our_start = std::chrono::high_resolution_clock::now();
+
+    for (int i = 0; i < 10; ++i) {
+        train_our(xo, yo);
+    }
+
+    auto our_end = std::chrono::high_resolution_clock::now();
+
+    std::chrono::duration<double, std::milli> elapsed_minidnn = minidnn_end - minidnn_start;
+    std::chrono::duration<double, std::milli> elapsed_our = our_end - our_start;
+
+    std::cout << "[COMPLETED] " << "MiniDNN in " << elapsed_minidnn.count() << " ms\n";
+    std::cout << "[COMPLETED] " << "Ours in " << elapsed_our.count() << " ms\n";
+}
+
 int main() {
     test_random_forest_classifier();
     test_decision_tree_classifier();
     test_lda_classifier();
-    test_mlp_classifier();
-    //test_logistic_classifier();
-    test_svc_classifier();
-    test_rbfsvc_classifier();
+    //test_mlp_classifier();
+    test_logistic_classifier();
+    //test_svc_classifier();
+    //test_rbfsvc_classifier();
+    compare_minidnn();
 }

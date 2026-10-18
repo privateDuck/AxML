@@ -2,9 +2,9 @@
 #ifndef AXML_MLP_HPP
 #define AXML_MLP_HPP
 
-#include "base.hpp"
-#include "feedforward/feedforward_network.hpp"
-#include "feedforward/optimizer.hpp"
+#include "../core/base.hpp"
+#include "../feedforward/feedforward_network.hpp"
+#include "../feedforward/optimizer.hpp"
 
 namespace AxML {
 

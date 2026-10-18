@@ -2,7 +2,7 @@
 #ifndef AXML_KMEANS_HPP
 #define AXML_KMEANS_HPP
 
-#include "base.hpp"
+#include "../core/base.hpp"
 #include <random>
 
 namespace AxML {

@@ -2,7 +2,7 @@
 #ifndef AXML_LOGISTIC_HPP
 #define AXML_LOGISTIC_HPP
 
-#include "../base.hpp"
+#include "../core/base.hpp"
 #include "../feedforward/linear_base.hpp"
 #include "../label_encoder.hpp"
 

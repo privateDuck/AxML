@@ -11,8 +11,8 @@
 #include <ranges>
 #include <span>
 #include <vector>
-#include "base.hpp"
-#include "flat_tree.hpp"
+#include "../core/base.hpp"
+#include "../flat_tree.hpp"
 
 namespace AxML {
     namespace detail {
