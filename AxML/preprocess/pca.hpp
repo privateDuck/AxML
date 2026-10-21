@@ -2,9 +2,9 @@
 #ifndef AXML_PCA_HPP
 #define AXML_PCA_HPP
 
-#include "core/base.hpp"
-#include "utils/randomized_svd.hpp"
-#include "preprocess/scaler.hpp"
+#include "../core/base.hpp"
+#include "../utils/randomized_svd.hpp"
+#include "scaler.hpp"
 
 namespace AxML {
 
